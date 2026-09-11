@@ -32,8 +32,9 @@ has_local_result() {
 
 copy_remote_result() {
   mkdir -p "$LOCAL_OUTPUT"
-  # Merge into a partial local copy so an interrupted scp is recoverable.
-  scp -r "$REMOTE_HOST:$REMOTE_OUTPUT/." "$LOCAL_OUTPUT/"
+  # Merge into a partial local copy so an interrupted transfer is recoverable.
+  ssh "$REMOTE_HOST" "cd '$REMOTE_OUTPUT' && tar -cf - ." \
+    | tar -C "$LOCAL_OUTPUT" -xf -
   if ! has_local_result; then
     echo "Expected exactly one summary.json and episodes.csv under $LOCAL_OUTPUT"
     return 1
