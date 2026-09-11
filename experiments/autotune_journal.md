@@ -506,4 +506,10 @@
   zero and ramp to one for five iterations. It exited 0, remained finite, and
   reported asymmetric fractions rising to 0.435 (the configured expectation is
   `0.80 * 0.50 = 0.40`), proving the new target branch was exercised.
-- Status: validation passed; four-run screen ready to launch.
+- Launch: all four runs started in detached remote tmux sessions on 2026-09-11
+  at approximately 03:50 CST from clean commit `86b9df6`, one run per H20.
+  A post-launch check found all four sessions alive, each GPU at 60--73%
+  utilization, finite rewards, and PPO iterations advancing. As expected, the
+  asymmetric metric remains zero before the 30k-step curriculum warmup ends.
+- Status: four-run screen active; watcher group `g1_stage3_screen_v1` will wait
+  for all siblings before one medium-reasoning analysis turn.
