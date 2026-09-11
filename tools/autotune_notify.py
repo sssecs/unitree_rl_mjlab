@@ -60,7 +60,7 @@ def main() -> None:
   with smtp:
     smtp.login(cfg["AUTOTUNE_SMTP_USERNAME"], cfg["AUTOTUNE_SMTP_PASSWORD"])
     smtp.send_message(message)
-  print(f"[autotune] stop email sent to {cfg['AUTOTUNE_EMAIL_TO']}")
+  print(f"[autotune] email sent to {cfg['AUTOTUNE_EMAIL_TO']}")
 
 
 if __name__ == "__main__":

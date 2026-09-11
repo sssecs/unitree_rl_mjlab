@@ -30,7 +30,7 @@ mkdir -p \
     "$HANDLED_DIR" "$FAILED_DIR" "$ATTEMPTS_DIR" "$RESULTS_DIR" \
     "$PENDING_DIR" "$GROUP_DIR" "$EVAL_ATTEMPTS_DIR"
 
-notify_stop() {
+notify_email() {
     local subject="$1"
     local body_file="$2"
     python3 tools/autotune_notify.py "$subject" "$body_file" \
@@ -151,7 +151,7 @@ while true; do
 Stopped after $TRIAL: fixed held-out evaluation failed $EVAL_ATTEMPTS times.
 Remote training artifacts are preserved. Repair evaluation before promotion.
 EOF
-                notify_stop "G1 autotune stopped: evaluation failure" "$STOP_FILE"
+                notify_email "G1 autotune stopped: evaluation failure" "$STOP_FILE"
                 echo "[autotune] evaluator retry limit reached; watcher exiting"
                 exit 1
             else
@@ -228,10 +228,11 @@ EOF
         if [ -s "$STOP_FILE" ]; then
             echo "[autotune] stop requested by analysis:"
             sed 's/^/[autotune]   /' "$STOP_FILE"
-            notify_stop "G1 autotune stopped after $TRIAL" "$STOP_FILE"
+            notify_email "G1 autotune summary: $TRIAL (stopped)" "$RESULT_FILE"
             echo "[autotune] watcher exiting cleanly"
             exit 0
         fi
+        notify_email "G1 autotune summary: $TRIAL" "$RESULT_FILE"
         sleep "$POLL_INTERVAL_SECONDS"
         continue
     fi
@@ -243,7 +244,7 @@ EOF
 Stopped after $TRIAL: Codex analysis failed $ATTEMPTS times.
 Remove $FAILED_DIR/$TRIAL and restart the watcher after fixing authentication or connectivity.
 EOF
-        notify_stop "G1 autotune stopped: Codex failure" "$STOP_FILE"
+        notify_email "G1 autotune stopped: Codex failure" "$STOP_FILE"
         echo "[autotune] retry limit reached; watcher exiting"
         exit 1
     fi
