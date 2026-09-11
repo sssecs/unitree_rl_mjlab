@@ -164,6 +164,11 @@ def unitree_g1_wrist_recovery_env_cfg(
       weight=4.0,
       params={"command_name": "wrists", "std": 0.05},
     ),
+    "height_wrist_pos": RewardTermCfg(
+      func=mdp.height_wrist_position_error_huber,
+      weight=-8.0,
+      params={"command_name": "wrists", "delta": 0.05},
+    ),
     "wrist_ori": RewardTermCfg(
       func=mdp.wrist_orientation_error_exp,
       weight=1.0,
@@ -207,6 +212,11 @@ def unitree_g1_wrist_recovery_env_cfg(
       func=mdp.shoulder_height_tracking_exp,
       weight=3.0,
       params={"command_name": "wrists", "std": 0.08},
+    ),
+    "height_shoulder_dense": RewardTermCfg(
+      func=mdp.height_shoulder_error_huber,
+      weight=-6.0,
+      params={"command_name": "wrists", "delta": 0.05},
     ),
     "backward_lean": RewardTermCfg(
       func=mdp.torso_backward_lean_l2,

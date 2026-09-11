@@ -95,6 +95,35 @@ def shoulder_height_tracking_exp(
   return torch.exp(-error / std) * command.height_active.float()
 
 
+def _huber_distance(error: torch.Tensor, delta: float) -> torch.Tensor:
+  """Huber loss in distance units, with a non-saturating far-field gradient."""
+  if delta <= 0.0:
+    raise ValueError(f"Huber delta must be positive, got {delta}.")
+  return torch.where(
+    error <= delta,
+    0.5 * torch.square(error) / delta,
+    error - 0.5 * delta,
+  )
+
+
+def height_wrist_position_error_huber(
+  env: ManagerBasedRlEnv, command_name: str, delta: float
+) -> torch.Tensor:
+  command = _command(env, command_name)
+  error = torch.linalg.norm(
+    command.desired_wrist_pos_w - command.robot_wrist_pos_w, dim=-1
+  ).mean(-1)
+  return _huber_distance(error, delta) * command.height_active.float()
+
+
+def height_shoulder_error_huber(
+  env: ManagerBasedRlEnv, command_name: str, delta: float
+) -> torch.Tensor:
+  command = _command(env, command_name)
+  error = torch.abs(command.target_shoulder_height - command.shoulder_height)
+  return _huber_distance(error, delta) * command.height_active.float()
+
+
 def torso_backward_lean_l2(
   env: ManagerBasedRlEnv, command_name: str, deadzone: float
 ) -> torch.Tensor:

@@ -783,3 +783,33 @@
   autonomous training here.  No further defined Stage 5 controlled factor or
   acceptance criterion exists, and Stage 6 requires the absent mapped-trajectory
   split and interface contract; launching another run would not be justified.
+
+### Stage 5A v1 post-analysis and repair decision
+
+- The provisional selections above are overturned by absolute-task analysis.
+  At 25% height exposure, final-100 wrist error was about 0.19 m; at 50% it was
+  about 0.385 m. This near-linear scaling with height exposure, while Stage 3
+  non-height tracking was millimeter-scale, indicates that the height-active
+  cases were being sacrificed rather than solved. All candidates finished with
+  shoulder height near 1.065--1.070 m and only about 6--9 degrees of forward
+  torso bend. The temporary lower posture around iteration 2,000 disappeared by
+  iteration 3,000, consistent with convergence to the easier standing solution.
+- Root cause: shoulder height and absolute wrist height were sampled
+  independently. The XML link offsets give a 0.4104 m shoulder-pitch-anchor to
+  wrist-yaw-anchor path-length upper bound. Monte Carlo integration of the
+  configured independent uniform ranges shows that the vertical gap alone
+  exceeded 0.410 m for 75.5% of moderate and 95.3% of deep samples; forward
+  extension and joint/collision limits make the true infeasible fraction higher.
+  The exponential shoulder term and fine wrist term then supplied almost no
+  far-field gradient, while alive and easy-task rewards remained available.
+- Stage 5B additionally used the velocity command's 0.1 norm deadband. Only
+  about 28.0% of sampled low-range commands survive it, so `active25_low` had
+  nonzero commands in only about 7.0% of all environments. It was the easiest
+  candidate, not evidence of learned locomotion. Stage 5B remains paused.
+- Repair hypothesis: translate each height-active wrist target by the same
+  vertical displacement commanded for the shoulders, add only a small residual
+  wrist-height offset, and add height-active Huber losses for wrist and shoulder
+  errors. This should remove contradictory commands and prevent large-error
+  reward saturation without prescribing whether the robot bends its waist,
+  knees, or both. First validate with stationary commands, then screen moderate
+  versus deep shoulder lowering at 35%/50% exposure.

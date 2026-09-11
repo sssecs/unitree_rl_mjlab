@@ -114,6 +114,30 @@ control and low wrist targets, then introduce planar motion as a separate
 controlled factor. Stage 6 still requires the mapped trajectory split and
 interface contract.
 
+The first Stage 5A screen is rejected despite completing normally. Its absolute
+wrist-height and shoulder-height targets were sampled independently. The G1
+shoulder-pitch-to-wrist-yaw kinematic chain is at most about 0.410 m before
+joint-limit and collision margins, while 75.5% of the moderate samples and
+95.3% of the deep samples exceeded that distance in the vertical axis alone.
+The approximately twofold increase in aggregate wrist error when height-task
+frequency increased from 25% to 50%, together with a final shoulder height near
+1.07 m in every run, indicates that the policy preserved the old task and
+sacrificed the height-active cases. The subsequent twist screen is therefore
+also rejected as a Stage 5 promotion result.
+
+Stage 5A repair v2 couples the targets: the final wrist height is its initial
+height plus the commanded shoulder-height change plus only a small residual
+offset. This preserves the initially feasible shoulder--wrist vertical
+separation while permitting grasp-height variation. A height-active Huber loss
+is added for both wrist position and shoulder height so large errors retain a
+non-saturating gradient; the existing exponential/fine terms remain responsible
+for final precision. Diagnostics must report height-active and non-height wrist
+errors separately. Do not introduce planar twist until a stationary candidate
+has height-active wrist error below 4 cm, height-active shoulder error below
+5 cm, nearly full episode length, no systematic backward lean, and acceptable
+non-height wrist retention. The repair screen is defined in
+`experiments/stage5a_feasible_screen_v2.json`.
+
 Example:
 
 ```bash

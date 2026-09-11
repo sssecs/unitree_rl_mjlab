@@ -38,7 +38,7 @@ class BimanualWristCommand(CommandTerm):
       raise ValueError("height_probability must be in [0, 1].")
     for name, bounds in (
       ("shoulder_height_range", cfg.shoulder_height_range),
-      ("low_wrist_height_range", cfg.low_wrist_height_range),
+      ("wrist_height_offset_range", cfg.wrist_height_offset_range),
       ("low_reach_extension_range", cfg.low_reach_extension_range),
     ):
       if bounds[0] > bounds[1]:
@@ -83,10 +83,13 @@ class BimanualWristCommand(CommandTerm):
     self.height_active = torch.zeros(
       self.num_envs, dtype=torch.bool, device=self.device
     )
+    self.height_difficulty = torch.zeros(self.num_envs, device=self.device)
     self.sampled_shoulder_height = torch.zeros(
       self.num_envs, device=self.device
     )
-    self.sampled_wrist_height = torch.zeros(self.num_envs, device=self.device)
+    self.sampled_wrist_height_offset = torch.zeros(
+      self.num_envs, device=self.device
+    )
     self.start_shoulder_height = torch.zeros(self.num_envs, device=self.device)
     self.target_shoulder_height = torch.zeros(self.num_envs, device=self.device)
     self.final_shoulder_height = torch.zeros(self.num_envs, device=self.device)
@@ -111,7 +114,11 @@ class BimanualWristCommand(CommandTerm):
       "foot_stagger",
       "asymmetric_fraction",
       "height_command_fraction",
+      "height_wrist_pos_error",
+      "nonheight_wrist_pos_error",
       "shoulder_height_error",
+      "height_shoulder_error",
+      "height_target_vertical_gap",
       "shoulder_height_difference",
       "torso_backward_lean",
       "torso_forward_bend",
@@ -233,15 +240,18 @@ class BimanualWristCommand(CommandTerm):
       torch.rand(len(env_ids), device=self.device) < height_probability
     )
     self.height_active[env_ids] = height_active
+    self.height_difficulty[env_ids] = curriculum
     self.sampled_shoulder_height[env_ids].uniform_(
       *self.cfg.shoulder_height_range
     )
-    self.sampled_wrist_height[env_ids].uniform_(*self.cfg.low_wrist_height_range)
+    self.sampled_wrist_height_offset[env_ids].uniform_(
+      *self.cfg.wrist_height_offset_range
+    )
     num_height = int(height_active.sum().item())
     if num_height > 0:
       height_extension = torch.empty(num_height, device=self.device)
       height_extension.uniform_(*self.cfg.low_reach_extension_range)
-      offsets[height_active, :, 0] = height_extension[:, None]
+      offsets[height_active, :, 0] = height_extension[:, None] * curriculum
     self.scenario[env_ids] = torch.maximum(
       self.scenario[env_ids], height_active.float()
     )
@@ -294,18 +304,31 @@ class BimanualWristCommand(CommandTerm):
       )
       offset_w = quat_apply(root_quat, self.sampled_offset_b[pending])
       self.final_pos_w[pending] = wrist_pos + offset_w
+      shoulder_height = self.shoulder_height[pending]
       height_pending = self.height_active[pending]
       if height_pending.any():
         height_ids = pending[height_pending]
-        self.final_pos_w[height_ids, :, 2] = self.sampled_wrist_height[
-          height_ids, None
-        ]
-      shoulder_height = self.shoulder_height[pending]
+        # Translate the wrists by the commanded shoulder-height change instead
+        # of sampling an unrelated absolute wrist height. This preserves the
+        # initially feasible shoulder--wrist vertical separation; the small
+        # offset remains available for grasp-height variation.
+        shoulder_delta = self.height_difficulty[height_ids] * (
+          self.sampled_shoulder_height[height_ids]
+          - shoulder_height[height_pending]
+        )
+        self.final_pos_w[height_ids, :, 2] = (
+          wrist_pos[height_pending, :, 2]
+          + shoulder_delta[:, None]
+          + self.height_difficulty[height_ids, None]
+          * self.sampled_wrist_height_offset[height_ids, None]
+        )
       self.start_shoulder_height[pending] = shoulder_height
       self.target_shoulder_height[pending] = shoulder_height
       self.final_shoulder_height[pending] = torch.where(
         height_pending,
-        self.sampled_shoulder_height[pending],
+        shoulder_height
+        + self.height_difficulty[pending]
+        * (self.sampled_shoulder_height[pending] - shoulder_height),
         shoulder_height,
       )
       aa_w = quat_apply(root_quat, self.sampled_axis_angle_b[pending])
@@ -393,6 +416,7 @@ class BimanualWristCommand(CommandTerm):
       )
     self.scenario.fill_(scenario_code)
     self.height_active.zero_()
+    self.height_difficulty.zero_()
     shoulder_height = self.shoulder_height
     self.start_shoulder_height.copy_(shoulder_height)
     self.target_shoulder_height.copy_(shoulder_height)
@@ -430,8 +454,23 @@ class BimanualWristCommand(CommandTerm):
     self.metrics["foot_stagger"] = torch.abs(feet[:, 0, 0] - feet[:, 1, 0])
     self.metrics["asymmetric_fraction"] = self.is_asymmetric.float()
     self.metrics["height_command_fraction"] = self.height_active.float()
+    height_mask = self.height_active.float()
+    nonheight_mask = (~self.height_active).float()
+    mean_pos_error = pos_error.mean(-1)
+    self.metrics["height_wrist_pos_error"] = mean_pos_error * height_mask
+    self.metrics["nonheight_wrist_pos_error"] = mean_pos_error * nonheight_mask
     self.metrics["shoulder_height_error"] = torch.abs(
       self.target_shoulder_height - self.shoulder_height
+    )
+    self.metrics["height_shoulder_error"] = (
+      self.metrics["shoulder_height_error"] * height_mask
+    )
+    self.metrics["height_target_vertical_gap"] = (
+      torch.abs(
+        self.target_shoulder_height
+        - self.desired_wrist_pos_w[..., 2].mean(-1)
+      )
+      * height_mask
     )
     self.metrics["shoulder_height_difference"] = self.shoulder_height_difference
     self.metrics["torso_backward_lean"] = torch.clamp_min(
@@ -460,7 +499,7 @@ class BimanualWristCommandCfg(CommandTermCfg):
   orientation_angle_range: tuple[float, float] = (-0.25, 0.25)
   height_probability: float = 0.0
   shoulder_height_range: tuple[float, float] = (0.72, 1.02)
-  low_wrist_height_range: tuple[float, float] = (0.12, 0.35)
+  wrist_height_offset_range: tuple[float, float] = (-0.02, 0.02)
   low_reach_extension_range: tuple[float, float] = (0.08, 0.22)
   reach_delay_s: float = 1.0
   reach_duration_s: float = 2.0
