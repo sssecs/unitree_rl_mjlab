@@ -4,7 +4,8 @@ Read AGENTS.md first and obey all repository/environment restrictions.
 
 Read `experiments/wrist_recovery_training_plan.md` and
 `experiments/autotune_journal.md` before interpreting results or choosing the
-next stage. The plan defines the fixed held-out protocol and promotion gates.
+next stage. The user makes the final policy judgment; automated results are
+provisional engineering evidence.
 
 A remote Unitree G1 training experiment or registered experiment group has just
 finished.
@@ -45,12 +46,12 @@ Your job is to:
    For a group, inspect every member and compare siblings together. A
    same-seed parameter screen may rank candidates, but cannot establish a final
    best policy; promote its winner to independent-seed confirmation.
-7. For a registered group with an evaluation plan, the shell watcher runs the
-   complete fixed nominal/robust matrix before this Codex turn. Read the paths
-   from the group manifest and do not rerun it. For another completed full run,
-   use or produce identical fixed held-out results for the candidate and
-   retained baseline. Do not select a checkpoint from training TensorBoard
-   metrics alone, and do not change held-out seeds, scenarios, or thresholds.
+7. Do not run the complete held-out matrix during autonomous exploration. It is
+   intentionally reserved for the user's final manual review because a group
+   matrix takes roughly two hours. If a plan explicitly sets
+   `evaluation.automatic=true`, read the materialized results from the group
+   manifest and do not rerun them. Otherwise rank training candidates only
+   provisionally from TensorBoard/log diagnostics and preserve every checkpoint.
 8. Update `experiments/autotune_journal.md` with the hypothesis, exact change,
    validation/full-run status, result, baseline comparison, and next decision.
 
@@ -73,10 +74,9 @@ When making a change:
 - synchronize using ./tools/remote_sync.sh;
 - launch through ./tools/remote_train.sh;
 - use a unique descriptive tmux session name.
-- launch independent parameter or seed runs as a registered group, and include
-  an `evaluation` block in its plan with nominal/robust suites, final checkpoint
-  name, and the retained baseline. This lets the shell watcher finish the fixed
-  evaluation matrix before the next model turn.
+- launch independent parameter or seed runs as a registered group. Omit the
+  `evaluation` block during exploration unless the user explicitly asks for an
+  automatic held-out run.
 
 For risky source-code or reward changes, first run a 1-GPU validation with 256
 environments. Only after it initializes, produces finite rewards, and starts PPO
@@ -88,12 +88,14 @@ active stage budget.
 Do not start another full 4-GPU run if one is already active.
 
 Stop instead of launching another experiment when any of these applies:
-- all requested acceptance metrics have been met;
+- all requested training stages have been explored and no controlled next step
+  remains;
 - the active stage budget recorded in `experiments/autotune_journal.md` has
   been exhausted;
 - two consecutive registered experiment groups fail to improve the targeted
   held-out wrist/balance metrics;
-- the next stage lacks its required data, interface, or quantitative evaluator;
+- the next stage lacks its required data or control interface (a missing
+  automatic evaluator alone is not a blocker because final evaluation is manual);
 - evidence is insufficient to justify a controlled next experiment.
 
 Never launch a run merely to keep the loop alive. When stopping, write the

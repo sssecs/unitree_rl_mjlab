@@ -1,0 +1,55 @@
+{
+  "group": "g1_stage5_height_screen_v1",
+  "mode": "parameter-screening",
+  "hypothesis": "A masked shoulder-height command plus low bilateral wrist targets can teach G1 to reach toward the floor while preserving wrist control; screening task frequency and depth separates curriculum overload from insufficient exposure.",
+  "task": "Unitree-G1-Wrist-Recovery-Teacher",
+  "common_args": [
+    "--env.scene.num-envs=4096",
+    "--agent.max-iterations=5000",
+    "--agent.logger=tensorboard",
+    "--env.commands.wrists.reach-probability=0.50",
+    "--env.commands.wrists.asymmetric-probability=0.50"
+  ],
+  "runs": [
+    {
+      "name": "freq025_moderate",
+      "gpu": 0,
+      "seed": 1501,
+      "args": [
+        "--env.commands.wrists.height-probability=0.25",
+        "--env.commands.wrists.shoulder-height-range", "(0.82,1.02)",
+        "--env.commands.wrists.low-wrist-height-range", "(0.35,0.55)"
+      ]
+    },
+    {
+      "name": "freq050_moderate",
+      "gpu": 1,
+      "seed": 1501,
+      "args": [
+        "--env.commands.wrists.height-probability=0.50",
+        "--env.commands.wrists.shoulder-height-range", "(0.82,1.02)",
+        "--env.commands.wrists.low-wrist-height-range", "(0.35,0.55)"
+      ]
+    },
+    {
+      "name": "freq025_deep",
+      "gpu": 2,
+      "seed": 1501,
+      "args": [
+        "--env.commands.wrists.height-probability=0.25",
+        "--env.commands.wrists.shoulder-height-range", "(0.68,0.98)",
+        "--env.commands.wrists.low-wrist-height-range", "(0.12,0.35)"
+      ]
+    },
+    {
+      "name": "freq050_deep",
+      "gpu": 3,
+      "seed": 1501,
+      "args": [
+        "--env.commands.wrists.height-probability=0.50",
+        "--env.commands.wrists.shoulder-height-range", "(0.68,0.98)",
+        "--env.commands.wrists.low-wrist-height-range", "(0.12,0.35)"
+      ]
+    }
+  ]
+}

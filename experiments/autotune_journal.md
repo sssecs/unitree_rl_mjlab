@@ -579,3 +579,125 @@
 - Stop notifications now support SMTP through the ignored
   `.autotune/notify.env`; notification remains disabled until local credentials
   and a recipient are configured.
+
+### Stage 3 screen final result and confirmation promotion (`g1_stage3_screen_v1`)
+
+- Status: all four fixed-seed screen siblings exited 0 after 5,000 PPO
+  iterations (655,360,000 environment steps each) on one H20 with 4,096
+  environments per rank/global. Their preserved logs completed normally at
+  iteration 4999; finite TensorBoard metrics and final checkpoints are present,
+  with no code/configuration error, infrastructure failure, NaN, or divergence.
+- Fixed held-out comparison: the two no-asymmetry candidates did not promote:
+  asymmetric reach success was only 19.8%/17.2% nominal and 18.8%/18.8% robust
+  for reach probabilities 0.50/0.80, respectively. Both asymmetric-target
+  candidates passed every nominal gate and the bounded robust gate: static,
+  payload, push, symmetric reach, asymmetric reach, and combined were each
+  100% successful with 0% falls in both suites. This materially improves the
+  retained `yawpen_v1_full2` baseline, whose nominal/robust reach successes
+  were 50.5/46.9% symmetric, 39.1/25.5% asymmetric, and 44.3/38.0% combined,
+  with 40--61% falls.
+- Ranking decision: select `reach050_asym050`, not as a final policy claim but
+  as the confirmation configuration. It had lower nominal/robust mean wrist
+  position errors than `reach080_asym050`: symmetric 0.89/0.96 versus
+  1.07/1.12 mm, asymmetric 1.53/1.67 versus 1.68/1.70 mm, and combined
+  0.84/0.92 versus 1.01/1.06 mm. Its static/load/push metrics remain quiet,
+  and the lower reach mixture is therefore the conservative controlled choice.
+- Decision: the unchanged Stage 3 promotion gate passes for the screen winner.
+  Launch the sole permitted independent-seed confirmation group
+  `g1_stage3_confirm_v1`: seeds 101, 211, 307, and 401, one H20 each, 4,096
+  environments per run (both per-rank and global), 5,000 iterations, with only
+  reach probability 0.50 and asymmetric-target probability 0.50 retained from
+  the winning screen. The registered plan fixes nominal/robust evaluation,
+  `model_4999.pt`, and the retained baseline. Aggregate held-out results across
+  seeds; reject any seed exceeding a relevant fall limit by over five points.
+
+### Stage 3 independent-seed confirmation result (`g1_stage3_confirm_v1`)
+
+- Hypothesis and exact change: confirm the promoted `reach_probability=0.50`,
+  `asymmetric_probability=0.50` configuration from the fixed-seed screen.
+  Relative to retained `yawpen_v1_full2`, this changes only the wrist-target
+  mixture; the existing randomized reset payloads and interval timed pushes,
+  reward, curriculum, PPO settings, and fixed evaluator remain unchanged.
+- Status: all four independent one-H20 siblings (`seed101`, `seed211`,
+  `seed307`, and `seed401`) exited 0, wrote DONE markers, TensorBoard event
+  files, and `model_4999.pt` checkpoints after 5,000 iterations. Each used
+  4,096 environments (one rank, hence both per-rank and global) and completed
+  in 3:11--3:16. Their final logs show finite PPO diagnostics, full 600-step
+  episodes, and no traceback, NaN, code/configuration failure, or
+  infrastructure failure. Final logged mean wrist error was 2.7--5.0 mm,
+  action acceleration 0.629--0.703, and asymmetric sample fraction
+  0.203--0.287. Remote status after completion showed no tmux session or GPU
+  process.
+- Fixed held-out nominal matrix (192 episodes/scenario/seed): aggregate
+  success was 100% for static hold, payload, push, symmetric reach, and
+  combined; asymmetric reach was 96.22% +/- 7.55 percentage points across
+  seeds. All fall rates were 0%. Mean wrist position error was 0.068--0.205 cm
+  by scenario, well below the Stage 3 4 cm final-position requirement. The
+  lowest individual asymmetric-reach success was 84.90% (seed401), but this is
+  not a rejection condition: the independent-seed rule applies gates to the
+  aggregate and rejects only an individual fall rate exceeding its limit by
+  more than five points; every individual fall rate was 0%.
+- Fixed held-out robust matrix: aggregate success was 100% for static hold,
+  payload, push, symmetric reach, and combined; asymmetric reach was
+  93.88% +/- 9.38 percentage points. Again all fall rates were 0%, with all
+  earlier-stage robust conditions above 85% success and both reach conditions
+  above 70% success. This exceeds the bounded-robust limits without tuning
+  the fixed seeds, scenarios, or thresholds.
+- Baseline comparison: retained `yawpen_v1_full2` produced nominal/robust
+  success of 50.52/48.96% symmetric reach, 39.06/29.69% asymmetric reach, and
+  44.79/44.79% combined, with 39.58--54.17% falls. The confirmation group
+  removes these reach/combined falls and raises every relevant success rate.
+  This is consistent across four independent training seeds, unlike a
+  single-seed training-metric claim.
+- Decision: Stage 3 promotion is confirmed. No new Stage 4 run is launched:
+  the confirmed training distribution already combines the required Stage 4
+  axes (asymmetric reach plus reset payload and timed interval pushes) and the
+  existing fixed combined evaluator is already passed at 100% nominal and
+  robust success with 0% falls. There is no separately defined Stage 4 input
+  factor or controlled screen whose result would distinguish a meaningful next
+  change. Stage 5 must not begin because its moving-command held-out scenarios
+  and quantitative gates are explicitly undefined in the training plan.
+  Retain the four confirmation `model_4999.pt` checkpoints as the validated
+  policy set; do not select a single seed from the held-out matrix for a new
+  claim. Stop the autonomous loop pending a defined Stage 5 evaluator/gate or
+  a user-specified next-stage training interface.
+
+### Stage 5A shoulder-height and low-reach screen
+
+- User-selected interface: extend the existing planar twist and bilateral wrist
+  pose commands with a masked shoulder-line height target. Shoulder height is
+  measured at the two fixed shoulder-pitch joint anchors, not at arm-dependent
+  link centers. No torso-pitch, knee-angle, or reference-motion command is
+  supplied, so forward waist flexion, knee flexion, and mixtures remain valid.
+- Safety shaping: backward torso lean receives a one-sided penalty beyond about
+  5 degrees. During initial learning, an active height task terminates only
+  after its smooth target trajectory is halfway complete and backward lean
+  exceeds 25 degrees. A shoulder-height-difference penalty has a 3 cm dead zone
+  to reject severe lateral exploitation without suppressing ordinary balance.
+  The fixed base-height and waist/hip-deviation costs are gated or reduced only
+  during height tasks; prior standing behavior retains the original costs.
+- Automatic evaluation policy: complete nominal/robust group matrices are no
+  longer run during exploration because they take roughly two hours. Training
+  metrics rank candidates provisionally, every checkpoint is preserved, and
+  the user performs the final visual and held-out judgment. The watcher runs a
+  held-out matrix only for a plan explicitly setting `evaluation.automatic`.
+- Validation `g1_stage5_height_active_smoke_v1` exited 2 before simulation: the
+  two-value Tyro options were initially passed in the wrong CLI representation.
+  The plan now uses Python tuple syntax, as required by `mjlab.TYRO_FLAGS`.
+- Validation `g1_stage5_height_active_smoke_v2` exited 0 and exercised 100%
+  deep height tasks, but the immediate 15-degree termination left mean episodes
+  near 15 steps and therefore provided inadequate learning horizon. This was a
+  training-design failure, not a CUDA or numerical failure.
+- Validation `g1_stage5_height_active_smoke_v3` exited 0 after five finite PPO
+  iterations with 256 environments. The delayed 25-degree hard constraint had
+  zero backward-lean terminations; mean episode length reached roughly 67--77
+  steps under the deliberately harsh 100% deep-task setting. Logged torso
+  forward bend was 0.37--0.57 while backward lean fell near zero in the final
+  iterations, confirming the intended branch and sign convention. The formal
+  runs retain the 30k-step warmup and 60k-step ramp.
+- Registered screen `g1_stage5_height_screen_v1` crosses height-task frequency
+  0.25/0.50 with moderate versus deep wrist/shoulder targets. All four siblings
+  use seed 1501, one H20, 4,096 environments (per-rank and global), 5,000 PPO
+  iterations, and the confirmed Stage 3 reach/asymmetry mixture. This screen
+  tests stationary height/ground-reaching control; planar movement remains zero
+  and will be introduced as the next separate factor after provisional review.

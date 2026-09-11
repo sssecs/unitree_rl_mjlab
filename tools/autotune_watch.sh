@@ -132,7 +132,7 @@ while true; do
             continue
         fi
         PLAN_FILE="$(jq -r '.plan_file' "$GROUP_FILE")"
-        if jq -e '.evaluation != null' "$PLAN_FILE" >/dev/null \
+        if jq -e '.evaluation.automatic == true' "$PLAN_FILE" >/dev/null \
             && ! jq -e '.evaluation_complete == true' "$GROUP_FILE" >/dev/null;
         then
             EVAL_ATTEMPTS_FILE="$EVAL_ATTEMPTS_DIR/$CANDIDATE_GROUP"

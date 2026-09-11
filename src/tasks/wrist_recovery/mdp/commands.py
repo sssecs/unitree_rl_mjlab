@@ -34,6 +34,15 @@ class BimanualWristCommand(CommandTerm):
       raise ValueError("reach_probability must be in [0, 1].")
     if not 0.0 <= cfg.asymmetric_probability <= 1.0:
       raise ValueError("asymmetric_probability must be in [0, 1].")
+    if not 0.0 <= cfg.height_probability <= 1.0:
+      raise ValueError("height_probability must be in [0, 1].")
+    for name, bounds in (
+      ("shoulder_height_range", cfg.shoulder_height_range),
+      ("low_wrist_height_range", cfg.low_wrist_height_range),
+      ("low_reach_extension_range", cfg.low_reach_extension_range),
+    ):
+      if bounds[0] > bounds[1]:
+        raise ValueError(f"{name} lower bound exceeds upper bound: {bounds}")
     self.robot: Entity = env.scene[cfg.entity_name]
     wrist_ids, names = self.robot.find_bodies(
       cfg.wrist_body_names, preserve_order=True
@@ -47,6 +56,16 @@ class BimanualWristCommand(CommandTerm):
     if len(foot_ids) != 2:
       raise ValueError(f"Expected two foot bodies, found {foot_names}.")
     self.foot_body_ids = foot_ids
+    shoulder_ids, shoulder_names = self.robot.find_bodies(
+      cfg.shoulder_body_names, preserve_order=True
+    )
+    if len(shoulder_ids) != 2:
+      raise ValueError(f"Expected two shoulder bodies, found {shoulder_names}.")
+    self.shoulder_body_ids = shoulder_ids
+    torso_ids, torso_names = self.robot.find_bodies((cfg.torso_body_name,))
+    if len(torso_ids) != 1:
+      raise ValueError(f"Expected one torso body, found {torso_names}.")
+    self.torso_body_id = torso_ids[0]
 
     shape = (self.num_envs, 2, 3)
     self.start_pos_w = torch.zeros(shape, device=self.device)
@@ -61,6 +80,16 @@ class BimanualWristCommand(CommandTerm):
     self.is_asymmetric = torch.zeros(
       self.num_envs, dtype=torch.bool, device=self.device
     )
+    self.height_active = torch.zeros(
+      self.num_envs, dtype=torch.bool, device=self.device
+    )
+    self.sampled_shoulder_height = torch.zeros(
+      self.num_envs, device=self.device
+    )
+    self.sampled_wrist_height = torch.zeros(self.num_envs, device=self.device)
+    self.start_shoulder_height = torch.zeros(self.num_envs, device=self.device)
+    self.target_shoulder_height = torch.zeros(self.num_envs, device=self.device)
+    self.final_shoulder_height = torch.zeros(self.num_envs, device=self.device)
     self.extension = torch.zeros(self.num_envs, device=self.device)
     self.elapsed = torch.zeros(self.num_envs, device=self.device)
     self.phase = torch.zeros(self.num_envs, device=self.device)
@@ -81,6 +110,14 @@ class BimanualWristCommand(CommandTerm):
       "inter_wrist_error",
       "foot_stagger",
       "asymmetric_fraction",
+      "height_command_fraction",
+      "shoulder_height_error",
+      "shoulder_height_difference",
+      "torso_backward_lean",
+      "torso_forward_bend",
+      "shoulder_height",
+      "target_shoulder_height",
+      "target_wrist_height",
     ):
       self.metrics[key] = torch.zeros(self.num_envs, device=self.device)
 
@@ -91,6 +128,28 @@ class BimanualWristCommand(CommandTerm):
   @property
   def robot_wrist_quat_w(self) -> torch.Tensor:
     return self.robot.data.body_link_quat_w[:, self.wrist_body_ids]
+
+  @property
+  def shoulder_heights_w(self) -> torch.Tensor:
+    # These body origins coincide with the shoulder joint anchors, so rotating
+    # an arm does not move its shoulder-height reference point.
+    return self.robot.data.body_link_pos_w[:, self.shoulder_body_ids, 2]
+
+  @property
+  def shoulder_height(self) -> torch.Tensor:
+    return self.shoulder_heights_w.mean(-1)
+
+  @property
+  def shoulder_height_difference(self) -> torch.Tensor:
+    heights = self.shoulder_heights_w
+    return torch.abs(heights[:, 0] - heights[:, 1])
+
+  @property
+  def torso_forward_axis_z(self) -> torch.Tensor:
+    torso_quat = self.robot.data.body_link_quat_w[:, self.torso_body_id]
+    forward = torch.zeros(self.num_envs, 3, device=self.device)
+    forward[:, 0] = 1.0
+    return quat_apply(torso_quat, forward)[:, 2]
 
   @property
   def desired_wrist_pos_w(self) -> torch.Tensor:
@@ -138,7 +197,17 @@ class BimanualWristCommand(CommandTerm):
   def command(self) -> torch.Tensor:
     pos_b, quat_b = self.target_pose_b
     rot6d_b = matrix_from_quat(quat_b)[..., :2].reshape(self.num_envs, -1)
-    task = torch.stack((self.scenario, self.phase, self.extension), dim=-1)
+    task = torch.stack(
+      (
+        self.scenario,
+        self.phase,
+        self.extension,
+        self.target_shoulder_height,
+        self.target_shoulder_height - self.shoulder_height,
+        self.height_active.float(),
+      ),
+      dim=-1,
+    )
     return torch.cat((pos_b.flatten(1), rot6d_b, task), dim=-1)
 
   def _resample_command(self, env_ids: torch.Tensor) -> None:
@@ -149,18 +218,38 @@ class BimanualWristCommand(CommandTerm):
     ) / self.cfg.curriculum_ramp_steps
     curriculum = float(max(0.0, min(1.0, curriculum)))
     reach_probability = self.cfg.reach_probability * curriculum
-    self.scenario[env_ids] = (
+    reach_active = (
       torch.rand(len(env_ids), device=self.device) < reach_probability
-    ).float()
+    )
+    self.scenario[env_ids] = reach_active.float()
     self.extension[env_ids].uniform_(*self.cfg.extension_range)
     self.extension[env_ids] *= self.scenario[env_ids] * curriculum
     offsets = torch.zeros(len(env_ids), 2, 3, device=self.device)
     offsets[..., 0] = self.extension[env_ids, None]
     axis_angles = torch.zeros_like(offsets)
+
+    height_probability = self.cfg.height_probability * curriculum
+    height_active = (
+      torch.rand(len(env_ids), device=self.device) < height_probability
+    )
+    self.height_active[env_ids] = height_active
+    self.sampled_shoulder_height[env_ids].uniform_(
+      *self.cfg.shoulder_height_range
+    )
+    self.sampled_wrist_height[env_ids].uniform_(*self.cfg.low_wrist_height_range)
+    num_height = int(height_active.sum().item())
+    if num_height > 0:
+      height_extension = torch.empty(num_height, device=self.device)
+      height_extension.uniform_(*self.cfg.low_reach_extension_range)
+      offsets[height_active, :, 0] = height_extension[:, None]
+    self.scenario[env_ids] = torch.maximum(
+      self.scenario[env_ids], height_active.float()
+    )
+
     asymmetric = (
       torch.rand(len(env_ids), device=self.device)
       < self.cfg.asymmetric_probability
-    ) & (self.scenario[env_ids] > 0)
+    ) & reach_active & ~height_active
     num_asymmetric = int(asymmetric.sum().item())
     if num_asymmetric > 0:
       asymmetric_offsets = torch.empty(
@@ -205,6 +294,20 @@ class BimanualWristCommand(CommandTerm):
       )
       offset_w = quat_apply(root_quat, self.sampled_offset_b[pending])
       self.final_pos_w[pending] = wrist_pos + offset_w
+      height_pending = self.height_active[pending]
+      if height_pending.any():
+        height_ids = pending[height_pending]
+        self.final_pos_w[height_ids, :, 2] = self.sampled_wrist_height[
+          height_ids, None
+        ]
+      shoulder_height = self.shoulder_height[pending]
+      self.start_shoulder_height[pending] = shoulder_height
+      self.target_shoulder_height[pending] = shoulder_height
+      self.final_shoulder_height[pending] = torch.where(
+        height_pending,
+        self.sampled_shoulder_height[pending],
+        shoulder_height,
+      )
       aa_w = quat_apply(root_quat, self.sampled_axis_angle_b[pending])
       angle = torch.linalg.norm(aa_w, dim=-1)
       axis = aa_w / angle[..., None].clamp_min(1.0e-6)
@@ -241,6 +344,12 @@ class BimanualWristCommand(CommandTerm):
     )
     self.target_lin_vel_w.copy_(
       (self.target_pos_w - self.previous_target_pos_w) / self._env.step_dt
+    )
+    height_blend = raw_phase * raw_phase * (3.0 - 2.0 * raw_phase)
+    height_blend *= self.height_active.float()
+    self.target_shoulder_height.copy_(
+      self.start_shoulder_height
+      + height_blend * (self.final_shoulder_height - self.start_shoulder_height)
     )
 
   def set_scripted_trajectory(
@@ -283,6 +392,11 @@ class BimanualWristCommand(CommandTerm):
         torch.where((angle > 1e-6)[..., None], final, start_quat)
       )
     self.scenario.fill_(scenario_code)
+    self.height_active.zero_()
+    shoulder_height = self.shoulder_height
+    self.start_shoulder_height.copy_(shoulder_height)
+    self.target_shoulder_height.copy_(shoulder_height)
+    self.final_shoulder_height.copy_(shoulder_height)
     self.is_asymmetric.copy_(
       (position_offsets_b[:, 0] - position_offsets_b[:, 1])
       .abs()
@@ -315,6 +429,20 @@ class BimanualWristCommand(CommandTerm):
     feet = self.robot.data.body_link_pos_w[:, self.foot_body_ids]
     self.metrics["foot_stagger"] = torch.abs(feet[:, 0, 0] - feet[:, 1, 0])
     self.metrics["asymmetric_fraction"] = self.is_asymmetric.float()
+    self.metrics["height_command_fraction"] = self.height_active.float()
+    self.metrics["shoulder_height_error"] = torch.abs(
+      self.target_shoulder_height - self.shoulder_height
+    )
+    self.metrics["shoulder_height_difference"] = self.shoulder_height_difference
+    self.metrics["torso_backward_lean"] = torch.clamp_min(
+      self.torso_forward_axis_z, 0.0
+    )
+    self.metrics["torso_forward_bend"] = torch.clamp_min(
+      -self.torso_forward_axis_z, 0.0
+    )
+    self.metrics["shoulder_height"] = self.shoulder_height
+    self.metrics["target_shoulder_height"] = self.target_shoulder_height
+    self.metrics["target_wrist_height"] = self.desired_wrist_pos_w[..., 2].mean(-1)
 
 
 @dataclass(kw_only=True)
@@ -322,12 +450,18 @@ class BimanualWristCommandCfg(CommandTermCfg):
   entity_name: str
   wrist_body_names: tuple[str, str]
   foot_body_names: tuple[str, str]
+  shoulder_body_names: tuple[str, str]
+  torso_body_name: str
   reach_probability: float = 0.5
   asymmetric_probability: float = 0.0
   extension_range: tuple[float, float] = (0.12, 0.28)
   lateral_offset_range: tuple[float, float] = (-0.10, 0.10)
   vertical_offset_range: tuple[float, float] = (-0.06, 0.06)
   orientation_angle_range: tuple[float, float] = (-0.25, 0.25)
+  height_probability: float = 0.0
+  shoulder_height_range: tuple[float, float] = (0.72, 1.02)
+  low_wrist_height_range: tuple[float, float] = (0.12, 0.35)
+  low_reach_extension_range: tuple[float, float] = (0.08, 0.22)
   reach_delay_s: float = 1.0
   reach_duration_s: float = 2.0
   curriculum_warmup_steps: int = 30_000

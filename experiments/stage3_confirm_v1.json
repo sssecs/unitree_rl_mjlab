@@ -1,0 +1,28 @@
+{
+  "group": "g1_stage3_confirm_v1",
+  "mode": "independent-seed-confirmation",
+  "hypothesis": "The screen winner, 50% reach episodes with 50% asymmetric targets, reliably meets the fixed Stage 3 reach/support gates across independent training seeds while retaining Stages 0--2.",
+  "task": "Unitree-G1-Wrist-Recovery-Teacher",
+  "evaluation": {
+    "suites": ["nominal", "robust"],
+    "device": "cuda:0",
+    "checkpoint_name": "model_4999.pt",
+    "baseline": {
+      "name": "yawpen_v1_full2",
+      "checkpoint": "/home/dev/unitree_rl_mjlab/logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_12-12-08/model_4999.pt"
+    }
+  },
+  "common_args": [
+    "--env.scene.num-envs=4096",
+    "--agent.max-iterations=5000",
+    "--agent.logger=tensorboard",
+    "--env.commands.wrists.reach-probability=0.50",
+    "--env.commands.wrists.asymmetric-probability=0.50"
+  ],
+  "runs": [
+    {"name": "seed101", "gpu": 0, "seed": 101, "args": []},
+    {"name": "seed211", "gpu": 1, "seed": 211, "args": []},
+    {"name": "seed307", "gpu": 2, "seed": 307, "args": []},
+    {"name": "seed401", "gpu": 3, "seed": 401, "args": []}
+  ]
+}

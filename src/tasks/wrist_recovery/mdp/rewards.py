@@ -75,6 +75,43 @@ def base_height_l2(
   return torch.square(asset.data.root_link_pos_w[:, 2] - target_height)
 
 
+def base_height_when_shoulder_inactive_l2(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  target_height: float,
+  asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+  command = _command(env, command_name)
+  return base_height_l2(env, target_height, asset_cfg) * (
+    ~command.height_active
+  ).float()
+
+
+def shoulder_height_tracking_exp(
+  env: ManagerBasedRlEnv, command_name: str, std: float
+) -> torch.Tensor:
+  command = _command(env, command_name)
+  error = torch.abs(command.target_shoulder_height - command.shoulder_height)
+  return torch.exp(-error / std) * command.height_active.float()
+
+
+def torso_backward_lean_l2(
+  env: ManagerBasedRlEnv, command_name: str, deadzone: float
+) -> torch.Tensor:
+  """Penalize backward torso lean while leaving forward bending unpenalized."""
+  command = _command(env, command_name)
+  excess = torch.clamp_min(command.torso_forward_axis_z - deadzone, 0.0)
+  return torch.square(excess) * command.height_active.float()
+
+
+def shoulder_height_difference_l2(
+  env: ManagerBasedRlEnv, command_name: str, deadzone: float
+) -> torch.Tensor:
+  command = _command(env, command_name)
+  excess = torch.clamp_min(command.shoulder_height_difference - deadzone, 0.0)
+  return torch.square(excess)
+
+
 def base_horizontal_velocity_l2(
   env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg
 ) -> torch.Tensor:
@@ -113,6 +150,33 @@ def joint_deviation_l1(
       - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
     ),
     dim=-1,
+  )
+
+
+def joint_deviation_with_height_scale_l1(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  active_scale: float,
+  asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+  command = _command(env, command_name)
+  scale = torch.where(
+    command.height_active,
+    torch.full_like(command.scenario, active_scale),
+    torch.ones_like(command.scenario),
+  )
+  return joint_deviation_l1(env, asset_cfg) * scale
+
+
+def excessive_backward_lean(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  maximum_forward_axis_z: float,
+  minimum_phase: float,
+) -> torch.Tensor:
+  command = _command(env, command_name)
+  return command.height_active & (command.phase >= minimum_phase) & (
+    command.torso_forward_axis_z > maximum_forward_axis_z
   )
 
 

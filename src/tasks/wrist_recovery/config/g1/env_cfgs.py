@@ -18,6 +18,8 @@ from src.tasks.wrist_recovery import mdp
 
 WRISTS = ("left_wrist_yaw_link", "right_wrist_yaw_link")
 FEET = ("left_ankle_roll_link", "right_ankle_roll_link")
+SHOULDERS = ("left_shoulder_pitch_link", "right_shoulder_pitch_link")
+TORSO = "torso_link"
 FOOT_GEOMS = tuple(
   f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)
 )
@@ -80,6 +82,8 @@ def unitree_g1_wrist_recovery_env_cfg(
     entity_name="robot",
     wrist_body_names=WRISTS,
     foot_body_names=FEET,
+    shoulder_body_names=SHOULDERS,
+    torso_body_name=TORSO,
     resampling_time_range=(1.0e9, 1.0e9),
     reach_probability=0.5,
     asymmetric_probability=0.0,
@@ -191,9 +195,31 @@ def unitree_g1_wrist_recovery_env_cfg(
       func=mdp.flat_orientation_l2, weight=-3.0, params={"asset_cfg": robot}
     ),
     "base_height": RewardTermCfg(
-      func=mdp.base_height_l2,
+      func=mdp.base_height_when_shoulder_inactive_l2,
       weight=-5.0,
-      params={"target_height": 0.78, "asset_cfg": robot},
+      params={
+        "command_name": "wrists",
+        "target_height": 0.78,
+        "asset_cfg": robot,
+      },
+    ),
+    "shoulder_height": RewardTermCfg(
+      func=mdp.shoulder_height_tracking_exp,
+      weight=3.0,
+      params={"command_name": "wrists", "std": 0.08},
+    ),
+    "backward_lean": RewardTermCfg(
+      func=mdp.torso_backward_lean_l2,
+      weight=-20.0,
+      params={
+        "command_name": "wrists",
+        "deadzone": math.sin(math.radians(5.0)),
+      },
+    ),
+    "shoulder_level": RewardTermCfg(
+      func=mdp.shoulder_height_difference_l2,
+      weight=-10.0,
+      params={"command_name": "wrists", "deadzone": 0.03},
     ),
     "base_horizontal_velocity": RewardTermCfg(
       func=mdp.base_horizontal_velocity_l2,
@@ -222,14 +248,20 @@ def unitree_g1_wrist_recovery_env_cfg(
       },
     ),
     "joint_deviation_waist": RewardTermCfg(
-      func=mdp.joint_deviation_l1,
-      weight=-1.0,
-      params={"asset_cfg": SceneEntityCfg("robot", joint_names=r"waist.*")},
-    ),
-    "joint_deviation_hip": RewardTermCfg(
-      func=mdp.joint_deviation_l1,
+      func=mdp.joint_deviation_with_height_scale_l1,
       weight=-1.0,
       params={
+        "command_name": "wrists",
+        "active_scale": 0.1,
+        "asset_cfg": SceneEntityCfg("robot", joint_names=r"waist.*"),
+      },
+    ),
+    "joint_deviation_hip": RewardTermCfg(
+      func=mdp.joint_deviation_with_height_scale_l1,
+      weight=-1.0,
+      params={
+        "command_name": "wrists",
+        "active_scale": 0.1,
         "asset_cfg": SceneEntityCfg(
           "robot", joint_names=(r".*_hip_roll_joint", r".*_hip_yaw_joint")
         )
@@ -279,6 +311,14 @@ def unitree_g1_wrist_recovery_env_cfg(
     ),
     "bad_orientation": TerminationTermCfg(
       func=envs_mdp.bad_orientation, params={"limit_angle": 1.0}
+    ),
+    "backward_lean": TerminationTermCfg(
+      func=mdp.excessive_backward_lean,
+      params={
+        "command_name": "wrists",
+        "maximum_forward_axis_z": math.sin(math.radians(25.0)),
+        "minimum_phase": 0.5,
+      },
     ),
   }
   cfg.curriculum = {}

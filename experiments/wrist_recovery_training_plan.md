@@ -11,13 +11,19 @@ and acceptance thresholds must not be tuned against individual checkpoints.
   randomization. Training returns and training-episode metrics diagnose PPO but
   do not decide whether a policy is better.
 - Development evaluation may use separate fixed seeds while designing a stage.
-- Final held-out evaluation uses `scripts/evaluate_wrist_recovery.py`, fixed
+- Final manual held-out evaluation uses `scripts/evaluate_wrist_recovery.py`, fixed
   seeds `1103, 2207, 3301`, and all six scenarios. Every candidate is compared
   with the previous retained checkpoint under the identical evaluator command.
 - Report both `nominal` (task variables only) and `robust` (startup domain
   randomization retained). Never train directly on these exact scenario tuples.
 - Keep a change only when the targeted held-out metric improves without a
   material regression in wrist accuracy, falls, foot slip, or action quality.
+- Autonomous exploratory groups do not run the complete held-out matrix. That
+  matrix takes roughly two hours and is reserved for the user's final manual
+  checkpoint review. The watcher may provisionally rank candidates from
+  training diagnostics, but must preserve all checkpoints and must not label a
+  training-metric winner as the final policy. An evaluation runs automatically
+  only when its plan explicitly sets `evaluation.automatic=true`.
 
 ## Staged training curriculum
 
@@ -28,7 +34,7 @@ and acceptance thresholds must not be tuned against individual checkpoints.
 | 2. Reactive recovery | Add random impulses in longitudinal, lateral, and yaw directions. Allow stepping; do not reward a prescribed step. | `push`: fall rate <= 5%; success >= 85%; peak and final wrist errors improve over baseline; recovery does not rely on continuous shuffling. |
 | 3. Proactive support | Add symmetric and asymmetric reaches with target known before motion. Mix 0.12--0.30 m extension, lateral/vertical offsets, and modest wrist rotation. | Both reach scenarios: success >= 85%; final position < 4 cm; stable support change occurs without waiting for a fall; static hold remains quiet. |
 | 4. Combined robustness | Mix reach, payload, and timed push, including asymmetric cases; retain easier cases to prevent forgetting. | `combined`: fall rate <= 10%, success >= 75%; robust-suite degradation is bounded; all earlier gates remain acceptable. |
-| 5. Locomotion | Introduce base twist gradually: standing-dominant mixture, then slow forward/lateral/yaw walking while wrist targets remain world/task consistent. | Moving-window wrist error, velocity tracking, falls, slip, and action smoothness all meet separately defined gates. Do not infer readiness from total reward. |
+| 5. Locomotion and height | Add a masked shoulder-line height target, ground-reaching wrist targets, and then introduce base twist gradually. Permit forward waist flexion, knee flexion, or mixtures; prohibit using backward torso lean to lower the shoulders and penalize excessive shoulder height difference. | During automated exploration use wrist/height/velocity errors, falls, slip, backward lean, shoulder level, and action smoothness only as provisional diagnostics. The user performs final visual and held-out judgment. |
 | 6. EgoDex/Pico trajectories | Train on mapped continuous bimanual trajectories, with held-out objects/trajectory clips and latency/noise randomization. | Generalizes to unseen clips and asymmetric manipulation; simulator-to-real safety review precedes hardware execution. |
 
 For automated promotion, “bounded” robust degradation means: static, payload,
@@ -93,14 +99,20 @@ a candidate-ranking experiment, not multi-seed evidence. Do not launch the
 confirmation group unless the fixed held-out suite shows a useful improvement
 without regression of the already-passed static, payload, and push gates.
 
-Weekend automation may continue beyond Stage 3 when every preceding promotion
-gate passes. It may run one additional controlled screen plus one multi-seed
-confirmation per defined stage. Stage 4 can reuse the existing combined
-nominal/robust scenarios. Stage 5 must not start until moving-command held-out
-scenarios and quantitative gates have been added and validated. Stage 6 must
-not start without the actual mapped trajectory split and interface contract.
-These boundaries keep the weekend loop finite while allowing justified stage
-promotion rather than stopping mechanically at Stage 3.
+Stage 3 is confirmed across four independent seeds. Stage 4 is already covered
+by the concurrent reach/payload/timed-push mixture. Stage 5 is authorized with
+the command interface `[planar twist, bilateral wrist poses, shoulder-line
+height, height mask]`. The shoulder line is measured from the two fixed shoulder
+joint anchors. Do not command torso pitch or knee angles: forward waist flexion,
+knee flexion, and mixtures are all acceptable. A soft penalty begins near five
+degrees of backward torso lean. During initial learning, a height-task episode
+terminates only after the target trajectory is halfway complete and backward
+lean still exceeds twenty-five degrees; later stages may tighten this toward
+the deployment constraint. Excessive shoulder height difference uses a dead zone so
+lateral gait and push recovery remain possible. Start with stationary height
+control and low wrist targets, then introduce planar motion as a separate
+controlled factor. Stage 6 still requires the mapped trajectory split and
+interface contract.
 
 Example:
 
