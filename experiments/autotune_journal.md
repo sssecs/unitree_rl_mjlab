@@ -813,3 +813,21 @@
   reward saturation without prescribing whether the robot bends its waist,
   knees, or both. First validate with stationary commands, then screen moderate
   versus deep shoulder lowering at 35%/50% exposure.
+
+### Stage 5A feasible-target validation (`g1_stage5a_feasible_smoke_v2`)
+
+- Single-H20 validation used 256 environments, 120 PPO iterations, 100% active
+  moderate height commands, and no reach asymmetry. It exited 0 with finite
+  rewards, losses, observations, and the new conditional diagnostics; no Python,
+  CUDA, Warp, configuration, or NaN failure occurred.
+- The resolved configuration contains the coupled wrist offset range
+  +/-0.02 m, shoulder range 0.78--0.90 m, Huber wrist/shoulder weights -8/-6,
+  and zero planar command. The logged target shoulder--wrist vertical gap stayed
+  at 0.348--0.349 m, below the 0.410 m link-path upper bound, confirming that the
+  previous independent-height contradiction is removed.
+- This deliberately abrupt random-policy stress test is not a performance
+  evaluation: mean episodes increased only from roughly 60 to 82 steps and
+  still contained bad-orientation/backward-lean terminations. The formal screen
+  therefore retains the normal 30k-step warmup and 60k-step severity/probability
+  ramp so standing is learned before height commands become frequent. The smoke
+  authorizes the formal run only at the software/numerical level.
