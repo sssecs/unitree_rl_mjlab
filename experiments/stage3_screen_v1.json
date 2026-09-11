@@ -3,6 +3,15 @@
   "mode": "parameter-screening",
   "hypothesis": "Continuous asymmetric wrist targets improve proactive support and held-out reach robustness; a higher reach mixture may help, but must not erase mastered static/load/push behavior.",
   "task": "Unitree-G1-Wrist-Recovery-Teacher",
+  "evaluation": {
+    "suites": ["nominal", "robust"],
+    "device": "cuda:0",
+    "checkpoint_name": "model_4999.pt",
+    "baseline": {
+      "name": "yawpen_v1_full2",
+      "checkpoint": "/home/dev/unitree_rl_mjlab/logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_12-12-08/model_4999.pt"
+    }
+  },
   "common_args": [
     "--env.scene.num-envs=4096",
     "--agent.max-iterations=5000",

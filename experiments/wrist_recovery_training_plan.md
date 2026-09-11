@@ -84,6 +84,15 @@ a candidate-ranking experiment, not multi-seed evidence. Do not launch the
 confirmation group unless the fixed held-out suite shows a useful improvement
 without regression of the already-passed static, payload, and push gates.
 
+Weekend automation may continue beyond Stage 3 when every preceding promotion
+gate passes. It may run one additional controlled screen plus one multi-seed
+confirmation per defined stage. Stage 4 can reuse the existing combined
+nominal/robust scenarios. Stage 5 must not start until moving-command held-out
+scenarios and quantitative gates have been added and validated. Stage 6 must
+not start without the actual mapped trajectory split and interface contract.
+These boundaries keep the weekend loop finite while allowing justified stage
+promotion rather than stopping mechanically at Stage 3.
+
 Example:
 
 ```bash

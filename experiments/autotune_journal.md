@@ -513,3 +513,69 @@
   asymmetric metric remains zero before the 30k-step curriculum warmup ends.
 - Status: four-run screen active; watcher group `g1_stage3_screen_v1` will wait
   for all siblings before one medium-reasoning analysis turn.
+
+### Stage 3 screen result (`g1_stage3_screen_v1`)
+
+- Hypothesis and exact change: this fixed-seed, four-way screen tested reach
+  probability `0.50` versus `0.80` and asymmetric-target probability `0.00`
+  versus `0.50`; all other training, reward, curriculum, and PPO settings were
+  identical. Each sibling used seed 1201, one H20, 4,096 environments (both
+  per-rank and global), and 5,000 iterations (655,360,000 environment steps).
+- Status: all four runs exited 0 and completed their final iteration normally:
+  `reach050_asym000` (03:14:49), `reach080_asym000` (03:13:28),
+  `reach050_asym050` (03:12:57), and `reach080_asym050` (03:11:13). Their
+  preserved logs end at iteration 4999 with 600-step episodes and zero final
+  base-height/bad-orientation terminations; no crash, CUDA/Warp infrastructure
+  error, or non-finite training behavior was observed in the final logs.
+- Training diagnostics (final 100, ranking-only): `reach050_asym000` was the
+  least costly setting (wrist mean/peak/rotation errors 2.76/17.49 mm/0.0667
+  rad, action acceleration 0.6103, foot stagger 0.1623 m, yaw error 0.4691).
+  Raising reach to 0.80 without asymmetry worsened these to
+  3.09/18.02 mm/0.0696 rad, 0.6285, 0.1645 m, and 0.4900. Adding 0.50
+  asymmetry was costlier: reach050 had 3.71/18.95 mm/0.0883 rad, 0.6495,
+  0.1771 m, and 0.5104; reach080 had 3.19/18.25 mm/0.0831 rad, 0.6416,
+  0.1703 m, and 0.4969. The sampled asymmetric fractions were respectively
+  0, 0, 0.255, and 0.402, consistent with the intended branch. These are not
+  acceptance evidence and do not select a policy.
+- Held-out evaluation blocker: the required nominal fixed suite was invoked on
+  `reach050_asym000` via `tools/remote_evaluate_wrist.sh`. It first exposed a
+  launcher quoting defect that sent an empty optional argument; the local
+  wrapper was minimally fixed to omit optional arguments when none are given,
+  reviewed with `git diff`, and synchronized. A rerun then initialized the
+  immutable remote evaluator environment on cuda:0 but returned without
+  `summary.json`, `episodes.csv`, or copied artifacts. At the immediate status
+  check there was no tmux session and no listed GPU process, despite GPU 0
+  reporting 99% utilization. This is an evaluator-launch/infrastructure issue,
+  not evidence about any policy. The baseline nominal result remains the
+  identical evaluator-v1 run at
+  `results/wrist_recovery_eval/2026-09-11_10-56-40_model_4999_nominal`, but no
+  comparable candidate or robust result exists.
+- Decision: stop. The Stage 3 promotion gate explicitly requires useful fixed
+  held-out improvement without regression of static, payload, and push; this
+  cannot be assessed, and the training-only diagnostics already provide no
+  defensible winner. Do not launch the independent-seed confirmation group or
+  another training run. First repair and validate the remote evaluator process
+  lifecycle, then rerun the unchanged nominal and robust suites for all four
+  candidates and the retained baseline before considering promotion.
+
+### Stage 3 evaluator incident correction
+
+- The evaluator had not failed: its artifacts were written one timestamped
+  directory below the requested output root. The watcher checked only the root
+  and therefore misclassified a successful evaluation as missing. The existing
+  `reach050_asym000` nominal result was recovered intact.
+- The recovered result has 100% success and zero falls for static, payload,
+  push, symmetric reach, and combined. Asymmetric reach has zero falls but only
+  19.8% success, so the complete four-candidate nominal/robust matrix is still
+  required before promotion.
+- The remote evaluation wrapper now starts each evaluator in detached tmux,
+  records log/exit/DONE state, tolerates reconnects, discovers nested artifacts,
+  and supports idempotent recovery. An 8-environment detached evaluator smoke
+  test completed with exit 0 and copied all expected artifacts.
+- The shell watcher will materialize the full fixed evaluation matrix before
+  invoking Codex. This removes long evaluator waits from the model turn and
+  prevents training-only selection. Weekend automation may promote beyond
+  Stage 3 within the bounded gates in the training plan.
+- Stop notifications now support SMTP through the ignored
+  `.autotune/notify.env`; notification remains disabled until local credentials
+  and a recipient are configured.

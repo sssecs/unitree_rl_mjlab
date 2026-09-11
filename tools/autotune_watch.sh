@@ -6,6 +6,7 @@ REMOTE_REPO="/home/dev/unitree_rl_mjlab"
 POLL_INTERVAL_SECONDS="${AUTOTUNE_POLL_INTERVAL_SECONDS:-60}"
 RETRY_INTERVAL_SECONDS="${AUTOTUNE_RETRY_INTERVAL_SECONDS:-900}"
 MAX_CODEX_ATTEMPTS="${AUTOTUNE_MAX_CODEX_ATTEMPTS:-3}"
+MAX_EVAL_ATTEMPTS="${AUTOTUNE_MAX_EVAL_ATTEMPTS:-3}"
 CODEX_MODEL="${AUTOTUNE_CODEX_MODEL:-gpt-5.6-terra}"
 CODEX_REASONING_EFFORT="${AUTOTUNE_REASONING_EFFORT:-medium}"
 
@@ -23,10 +24,18 @@ RESULTS_DIR="$STATE_DIR/codex_results"
 PENDING_DIR="$STATE_DIR/pending"
 STOP_FILE="$STATE_DIR/STOP_REQUESTED"
 GROUP_DIR="$STATE_DIR/groups"
+EVAL_ATTEMPTS_DIR="$STATE_DIR/eval_attempts"
 
 mkdir -p \
     "$HANDLED_DIR" "$FAILED_DIR" "$ATTEMPTS_DIR" "$RESULTS_DIR" \
-    "$PENDING_DIR" "$GROUP_DIR"
+    "$PENDING_DIR" "$GROUP_DIR" "$EVAL_ATTEMPTS_DIR"
+
+notify_stop() {
+    local subject="$1"
+    local body_file="$2"
+    python3 tools/autotune_notify.py "$subject" "$body_file" \
+        || echo "[autotune] email notification failed; see output above"
+}
 
 # Only one watcher may trigger Codex for this worktree.
 exec 9>"$STATE_DIR/watcher.lock"
@@ -122,6 +131,35 @@ while true; do
             sleep "$POLL_INTERVAL_SECONDS"
             continue
         fi
+        PLAN_FILE="$(jq -r '.plan_file' "$GROUP_FILE")"
+        if jq -e '.evaluation != null' "$PLAN_FILE" >/dev/null \
+            && ! jq -e '.evaluation_complete == true' "$GROUP_FILE" >/dev/null;
+        then
+            EVAL_ATTEMPTS_FILE="$EVAL_ATTEMPTS_DIR/$CANDIDATE_GROUP"
+            EVAL_ATTEMPTS=0
+            if [ -f "$EVAL_ATTEMPTS_FILE" ]; then
+                EVAL_ATTEMPTS="$(cat "$EVAL_ATTEMPTS_FILE")"
+            fi
+            EVAL_ATTEMPTS=$((EVAL_ATTEMPTS + 1))
+            printf '%s\n' "$EVAL_ATTEMPTS" > "$EVAL_ATTEMPTS_FILE"
+            echo "[autotune] materializing held-out matrix attempt $EVAL_ATTEMPTS/$MAX_EVAL_ATTEMPTS..."
+            if python3 tools/autotune_evaluate_group.py "$GROUP_FILE"; then
+                rm -f "$EVAL_ATTEMPTS_FILE"
+                GROUP_DETAILS+="Fixed nominal/robust evaluation matrix is complete; paths are in the group manifest."$'\n'
+            elif [ "$EVAL_ATTEMPTS" -ge "$MAX_EVAL_ATTEMPTS" ]; then
+                cat > "$STOP_FILE" <<EOF
+Stopped after $TRIAL: fixed held-out evaluation failed $EVAL_ATTEMPTS times.
+Remote training artifacts are preserved. Repair evaluation before promotion.
+EOF
+                notify_stop "G1 autotune stopped: evaluation failure" "$STOP_FILE"
+                echo "[autotune] evaluator retry limit reached; watcher exiting"
+                exit 1
+            else
+                echo "[autotune] group evaluation failed; will retry"
+                sleep "$RETRY_INTERVAL_SECONDS"
+                continue
+            fi
+        fi
         EXIT_CODE="group"
     else
         if ! ssh -o ConnectTimeout=10 "$REMOTE_HOST" \
@@ -190,6 +228,7 @@ while true; do
         if [ -s "$STOP_FILE" ]; then
             echo "[autotune] stop requested by analysis:"
             sed 's/^/[autotune]   /' "$STOP_FILE"
+            notify_stop "G1 autotune stopped after $TRIAL" "$STOP_FILE"
             echo "[autotune] watcher exiting cleanly"
             exit 0
         fi
@@ -200,10 +239,13 @@ while true; do
     echo "[autotune] Codex failed for trial $TRIAL (attempt $ATTEMPTS)."
     if [ "$ATTEMPTS" -ge "$MAX_CODEX_ATTEMPTS" ]; then
         touch "$FAILED_DIR/$TRIAL"
-        echo "[autotune] retry limit reached; manual review required."
-        echo "[autotune] remove $FAILED_DIR/$TRIAL to retry after fixing the cause."
-        sleep "$POLL_INTERVAL_SECONDS"
-        continue
+        cat > "$STOP_FILE" <<EOF
+Stopped after $TRIAL: Codex analysis failed $ATTEMPTS times.
+Remove $FAILED_DIR/$TRIAL and restart the watcher after fixing authentication or connectivity.
+EOF
+        notify_stop "G1 autotune stopped: Codex failure" "$STOP_FILE"
+        echo "[autotune] retry limit reached; watcher exiting"
+        exit 1
     fi
 
     sleep "$RETRY_INTERVAL_SECONDS"

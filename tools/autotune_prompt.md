@@ -21,12 +21,13 @@ extraction, and focused source reads. Do not re-read the whole repository or
 reconstruct project history already recorded in the journal.
 
 This watcher normally runs GPT-5.6 Terra with medium reasoning. It may perform
-routine result extraction, failure diagnosis, held-out comparison, and a
-single-factor experiment already justified by the training plan. If the next
-step requires redesigning the policy architecture, observation interface,
-reward system, curriculum stage, or acceptance criteria, do not improvise the
-design or launch another run. Record the evidence and recommended decision in
-the journal, then stop so the interactive GPT-5.6 Sol session can review it.
+routine result extraction, failure diagnosis, held-out comparison, and
+controlled experiments justified by the staged training plan. The user has
+explicitly authorized automatic promotion beyond Stage 3 during this weekend.
+Advance to the next defined stage only after its current promotion gate passes;
+run validation before a risky change. Do not advance into a stage whose input
+data, evaluator, or quantitative gate is still undefined, and do not change an
+acceptance criterion to manufacture a pass.
 
 Your job is to:
 
@@ -44,13 +45,12 @@ Your job is to:
    For a group, inspect every member and compare siblings together. A
    same-seed parameter screen may rank candidates, but cannot establish a final
    best policy; promote its winner to independent-seed confirmation.
-7. For a completed full run, run the fixed held-out evaluator on both the
-   candidate and retained baseline (or reuse results produced by the identical
-   evaluator version, suite, seeds, and settings). Do not select a checkpoint
-   from training TensorBoard metrics alone, and do not change held-out seeds,
-   scenarios, or thresholds to favor a candidate.
-   Use `tools/remote_evaluate_wrist.sh` with a unique evaluation name for a
-   remote checkpoint; it copies the evaluator artifacts back to local results.
+7. For a registered group with an evaluation plan, the shell watcher runs the
+   complete fixed nominal/robust matrix before this Codex turn. Read the paths
+   from the group manifest and do not rerun it. For another completed full run,
+   use or produce identical fixed held-out results for the candidate and
+   retained baseline. Do not select a checkpoint from training TensorBoard
+   metrics alone, and do not change held-out seeds, scenarios, or thresholds.
 8. Update `experiments/autotune_journal.md` with the hypothesis, exact change,
    validation/full-run status, result, baseline comparison, and next decision.
 
@@ -73,6 +73,10 @@ When making a change:
 - synchronize using ./tools/remote_sync.sh;
 - launch through ./tools/remote_train.sh;
 - use a unique descriptive tmux session name.
+- launch independent parameter or seed runs as a registered group, and include
+  an `evaluation` block in its plan with nominal/robust suites, final checkpoint
+  name, and the retained baseline. This lets the shell watcher finish the fixed
+  evaluation matrix before the next model turn.
 
 For risky source-code or reward changes, first run a 1-GPU validation with 256
 environments. Only after it initializes, produces finite rewards, and starts PPO
@@ -89,7 +93,7 @@ Stop instead of launching another experiment when any of these applies:
   been exhausted;
 - two consecutive registered experiment groups fail to improve the targeted
   held-out wrist/balance metrics;
-- the next step requires a material design decision from the user;
+- the next stage lacks its required data, interface, or quantitative evaluator;
 - evidence is insufficient to justify a controlled next experiment.
 
 Never launch a run merely to keep the loop alive. When stopping, write the
