@@ -1,5 +1,6 @@
 """Script to train RL agent with RSL-RL."""
 
+import json
 import logging
 import os
 import sys
@@ -40,6 +41,7 @@ class TrainConfig:
 
 
 def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
+  base_seed = cfg.agent.seed
   cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
   if cuda_visible == "":
     device = "cpu"
@@ -59,7 +61,15 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   cfg.agent.seed = seed
   cfg.env.seed = seed
 
-  print(f"[INFO] Training with: device={device}, seed={seed}, rank={rank}")
+  world_size = int(os.environ.get("WORLD_SIZE", "1"))
+  envs_per_rank = cfg.env.scene.num_envs
+  total_envs = envs_per_rank * world_size
+
+  print(
+    f"[INFO] Training with: device={device}, seed={seed}, rank={rank}, "
+    f"envs_per_rank={envs_per_rank}, world_size={world_size}, "
+    f"total_envs={total_envs}"
+  )
 
   # Check if this is a tracking task by checking for motion command.
   is_tracking_task = "motion" in cfg.env.commands and isinstance(
@@ -134,6 +144,30 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   if rank == 0:
     dump_yaml(log_dir / "params" / "env.yaml", env_cfg)
     dump_yaml(log_dir / "params" / "agent.yaml", agent_cfg)
+    run_metadata = {
+      "task": task_id,
+      "log_dir": str(log_dir.resolve()),
+      "world_size": world_size,
+      "envs_per_rank": envs_per_rank,
+      "total_envs": total_envs,
+      "base_seed": base_seed,
+      "rank_seeds": [base_seed + i for i in range(world_size)],
+      "steps_per_env": getattr(cfg.agent, "num_steps_per_env", None),
+      "process_argv": sys.argv,
+      "exact_launch_args": "See AUTOTUNE_RUN_DIR/train_args",
+    }
+    metadata_dir_value = os.environ.get("AUTOTUNE_RUN_DIR")
+    if metadata_dir_value:
+      metadata_dir = Path(metadata_dir_value)
+      metadata_dir.mkdir(parents=True, exist_ok=True)
+      dump_yaml(metadata_dir / "resolved_env.yaml", env_cfg)
+      dump_yaml(metadata_dir / "resolved_agent.yaml", agent_cfg)
+      (metadata_dir / "training_log_dir").write_text(
+        str(log_dir.resolve()) + "\n"
+      )
+      (metadata_dir / "run_metadata.json").write_text(
+        json.dumps(run_metadata, indent=2) + "\n"
+      )
 
   runner.learn(
     num_learning_iterations=cfg.agent.max_iterations, init_at_random_ep_len=True

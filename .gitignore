@@ -2,6 +2,7 @@
 .idea
 outputs
 logs
+results/
 wandb
 .autotune/
 __pycache__/

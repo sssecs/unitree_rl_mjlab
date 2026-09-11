@@ -8,7 +8,14 @@ LOG_FILE="$STATE_DIR/watcher.log"
 
 mkdir -p "$STATE_DIR"
 
-for command_name in codex flock ssh tmux; do
+if [ -s "$STATE_DIR/STOP_REQUESTED" ]; then
+    mkdir -p "$STATE_DIR/stop_history"
+    STOP_ARCHIVE="$STATE_DIR/stop_history/$(date +%Y%m%d_%H%M%S).txt"
+    mv "$STATE_DIR/STOP_REQUESTED" "$STOP_ARCHIVE"
+    echo "Archived previous stop decision: $STOP_ARCHIVE"
+fi
+
+for command_name in codex flock jq ssh tmux; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
         echo "ERROR: required command not found: $command_name"
         exit 1

@@ -80,8 +80,8 @@
   count toward the five-full-run budget.
 - Decision: the source/configuration fix is validated. Launched the unchanged
   first full baseline as `g1_wrist_recovery_v0_full1` in detached remote tmux
-  on all four GPUs with
-  4,096 environments and 5,000 iterations. The hypothesis is that the staged
+  on all four GPUs with 4,096 environments per rank (16,384 globally) and
+  5,000 iterations. The hypothesis is that the staged
   30,000-step quiet-hold warmup and 60,000-step reach/payload/push ramp give PPO
   enough curriculum to learn wrist holding and balance recovery. Do not tune a
   reward or PPO parameter before establishing this baseline.
@@ -94,7 +94,8 @@
 - Exact change under test: none relative to the successful `v0_smoke4`
   validation. This was the first full baseline, using the initial wrist-recovery
   reward configuration and PPO settings.
-- Status: successful full 4-GPU run with 4,096 environments and 5,000
+- Status: successful full 4-GPU run with 4,096 environments per rank, 16,384
+  environments globally, and 5,000
   iterations; exit code 0. All workers completed normally in 3:15:44 after
   2,621,440,000 environment steps. This is full run 1 of the five-run budget.
 - Result: no traceback, code/configuration failure, infrastructure failure, NaN,
@@ -167,7 +168,8 @@
 - Decision: the reward change is safe enough for a controlled full comparison,
   and remote status showed no tmux sessions or GPU processes. Launch full run 2
   of at most five as `g1_wrist_recovery_yawpen_v1_full2` on all four GPUs with
-  4,096 environments and 5,000 iterations. Compare its final-window yaw-rate
+  4,096 environments per rank (16,384 globally) and 5,000 iterations. Compare
+  its final-window yaw-rate
   error, wrist errors, terminations, foot stagger/slide, and action acceleration
   directly against `g1_wrist_recovery_v0_full1`; do not infer improvement from
   total reward because its scale changed.
@@ -181,7 +183,8 @@
   to -0.5 relative to `g1_wrist_recovery_v0_full1`. Commands, curricula,
   disturbances, all other reward weights, and PPO settings were unchanged. The
   preceding `g1_wrist_recovery_yawpen_v1_val` validation passed.
-- Status: successful full 4-GPU run with 4,096 environments and 5,000
+- Status: successful full 4-GPU run with 4,096 environments per rank, 16,384
+  environments globally, and 5,000
   iterations; exit code 0. All workers completed normally in 3:16:41 after
   2,621,440,000 environment steps. This is full run 2 of the five-run budget.
 - Result: training was finite and stable. The run produced 5,000 samples for
@@ -273,7 +276,8 @@
   to -1.0 relative to `g1_wrist_recovery_yawpen_v1_full2`. Commands,
   curricula, disturbances, all other reward weights, and PPO settings were
   unchanged. The preceding `g1_wrist_recovery_yawpen_v2_val` validation passed.
-- Status: successful full 4-GPU run with 4,096 environments and 5,000
+- Status: successful full 4-GPU run with 4,096 environments per rank, 16,384
+  environments globally, and 5,000
   iterations; exit code 0. All workers completed normally in 3:14:47 after
   2,621,440,000 environment steps. This is full run 3 of the five-run budget.
 - Result: training was finite and stable. The run produced 5,000 samples for
@@ -355,7 +359,8 @@
 - Decision: the controlled midpoint reward passed validation. Remote status
   showed no tmux sessions, no GPU processes, and all four GPUs idle. Launch
   full run 4 of at most five as `g1_wrist_recovery_yawpen_v3_mid075_full4`
-  with 4,096 environments and 5,000 iterations on all four GPUs. Compare its
+  with 4,096 environments per rank (16,384 globally) and 5,000 iterations on
+  all four GPUs. Compare its
   final-100 yaw-rate error, wrist errors, terminations, foot stagger/slide,
   horizontal velocity, and action acceleration directly against both
   `g1_wrist_recovery_yawpen_v1_full2` and
@@ -373,7 +378,8 @@
   curricula, disturbances, all other reward weights, and PPO settings were
   unchanged. The preceding `g1_wrist_recovery_yawpen_v3_mid075_val`
   validation passed.
-- Status: successful full 4-GPU run with 4,096 environments and 5,000
+- Status: successful full 4-GPU run with 4,096 environments per rank, 16,384
+  environments globally, and 5,000
   iterations; exit code 0 and DONE marker present. All workers completed
   normally after 2,621,440,000 environment steps; the training loop elapsed
   3:15:24. This is full run 4 of the five-run budget.
@@ -422,3 +428,55 @@
   user decision prioritizes additional yaw suppression versus wrist/foot
   quality, or supplies an acceptance target that supports a controlled next
   experiment.
+
+### Held-out evaluator baseline (`yawpen_v1_full2`)
+
+- Added a deterministic evaluator with six fixed scenarios, 64 parallel
+  environments, and seeds 1103, 2207, and 3301 (1,152 episodes total). It
+  explicitly controls wrist targets, wrist payloads, and root-velocity pushes,
+  disables automatic training disturbances, and emits per-episode CSV plus
+  aggregate JSON and a manifest.
+- Static hold, payload, and push each achieved 100% success with no falls.
+  Static mean wrist position/orientation error was 1.29 mm/0.0121 rad. Under
+  push, mean position error was 1.22 mm, mean peak was 3.58 mm, and peak foot
+  displacement averaged 3.93 cm.
+- Symmetric reach achieved 53.1% success with 46.4% falls; asymmetric reach
+  achieved 38.5% success with 37.5% falls; combined reach/load/push achieved
+  40.1% success with 58.3% falls. These failures were hidden by the excellent
+  aggregate training metrics.
+- Decision: retain the checkpoint, but classify it as passing Stages 0--2 only.
+  The next training hypothesis should expand Stage 3 reach and asymmetric
+  support-posture training rather than spending the remaining experiment on a
+  further yaw-reward sweep. Do not tune against the exact held-out tuples.
+
+### Engineering audit correction
+
+- The four historical full runs used `env.scene.num_envs=4096` under four DDP
+  ranks. That means 4,096 environments per rank and 16,384 globally, consistent
+  with `5000 * 32 * 16384 = 2,621,440,000` environment steps. Earlier journal
+  wording that called this simply “4,096 environments” was corrected.
+- All four historical full policies came from one base training seed (with
+  rank-local seeds offset by local rank). Their 1--3% differences are not
+  statistically sufficient to establish a universal best configuration. The
+  `yawpen_v1_full2` checkpoint remains the retained single-run baseline because
+  of its held-out balance, but its “best” label is provisional pending
+  independent-seed confirmation.
+- Future runs use explicit per-rank/global counts, source/config provenance,
+  grouped four-way screening, and independent-seed confirmation before a final
+  policy claim.
+- Infrastructure validation passed on 2026-09-11. A one-GPU run with 64
+  environments and seed 907 completed two finite PPO iterations and wrote the
+  commit, dirty diff, exact arguments, file hashes, resolved YAML, TensorBoard
+  path, and run metadata. A four-GPU DDP run with 16 environments per rank and
+  seed 911 completed one iteration; metadata correctly recorded world size 4,
+  64 global environments, rank seeds 911--914, and the log reported exactly
+  `64 * 32 = 2,048` environment steps.
+- The first full-source snapshot was 170 MB, so the retained design now stores
+  the Git commit, binary dirty diff, hashes for every synchronized file, and a
+  compressed archive of untracked files only (9--12 KB in validation). The
+  oversized smoke-test archive was removed; its configs, hashes, logs, and
+  checkpoints remain.
+- Manifest-based tar synchronization was integration-tested by uploading and
+  then deleting one temporary managed file. The second sync pruned exactly that
+  path. A subsequent read-only audit found no extra files under remote `src`,
+  `scripts`, `tools`, or `experiments`.

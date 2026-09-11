@@ -1,0 +1,17 @@
+{
+  "group": "g1_stage3_confirm_v1",
+  "mode": "independent-seed-confirmation",
+  "task": "Unitree-G1-Wrist-Recovery-Teacher",
+  "common_args": [
+    "--env.scene.num-envs=4096",
+    "--agent.max-iterations=5000",
+    "--agent.logger=tensorboard",
+    "--env.commands.wrists.reach-probability=0.80"
+  ],
+  "runs": [
+    {"name": "seed101", "gpu": 0, "seed": 101, "args": []},
+    {"name": "seed211", "gpu": 1, "seed": 211, "args": []},
+    {"name": "seed307", "gpu": 2, "seed": 307, "args": []},
+    {"name": "seed401", "gpu": 3, "seed": 401, "args": []}
+  ]
+}

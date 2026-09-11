@@ -1,0 +1,36 @@
+{
+  "group": "g1_stage3_screen_v1",
+  "mode": "parameter-screening",
+  "task": "Unitree-G1-Wrist-Recovery-Teacher",
+  "common_args": [
+    "--env.scene.num-envs=4096",
+    "--agent.max-iterations=1000",
+    "--agent.logger=tensorboard"
+  ],
+  "runs": [
+    {
+      "name": "reach_p050",
+      "gpu": 0,
+      "seed": 101,
+      "args": ["--env.commands.wrists.reach-probability=0.50"]
+    },
+    {
+      "name": "reach_p065",
+      "gpu": 1,
+      "seed": 101,
+      "args": ["--env.commands.wrists.reach-probability=0.65"]
+    },
+    {
+      "name": "reach_p080",
+      "gpu": 2,
+      "seed": 101,
+      "args": ["--env.commands.wrists.reach-probability=0.80"]
+    },
+    {
+      "name": "reach_p095",
+      "gpu": 3,
+      "seed": 101,
+      "args": ["--env.commands.wrists.reach-probability=0.95"]
+    }
+  ]
+}

@@ -13,6 +13,7 @@ from mjlab.utils.lab_api.math import (
   quat_apply,
   quat_apply_inverse,
   quat_error_magnitude,
+  quat_from_angle_axis,
   quat_inv,
   quat_mul,
   subtract_frame_transforms,
@@ -58,6 +59,12 @@ class BimanualWristCommand(CommandTerm):
     self.needs_initialization = torch.ones(
       self.num_envs, dtype=torch.bool, device=self.device
     )
+    self.scripted = False
+    self.scripted_final_pos_w = torch.zeros(shape, device=self.device)
+    self.scripted_start_quat_w = self.target_quat_w.clone()
+    self.scripted_final_quat_w = self.target_quat_w.clone()
+    self.scripted_delay_s = cfg.reach_delay_s
+    self.scripted_duration_s = cfg.reach_duration_s
 
     for key in (
       "wrist_pos_error_mean",
@@ -126,6 +133,8 @@ class BimanualWristCommand(CommandTerm):
     return torch.cat((pos_b.flatten(1), rot6d_b, task), dim=-1)
 
   def _resample_command(self, env_ids: torch.Tensor) -> None:
+    if self.scripted:
+      return
     curriculum = (
       self._env.common_step_counter - self.cfg.curriculum_warmup_steps
     ) / self.cfg.curriculum_ramp_steps
@@ -166,19 +175,85 @@ class BimanualWristCommand(CommandTerm):
 
     self.elapsed += self._env.step_dt
     raw_phase = (
-      (self.elapsed - self.cfg.reach_delay_s) / self.cfg.reach_duration_s
+      (self.elapsed - self.scripted_delay_s) / self.scripted_duration_s
+      if self.scripted
+      else (self.elapsed - self.cfg.reach_delay_s) / self.cfg.reach_duration_s
     ).clamp(0.0, 1.0)
     self.phase = (
       raw_phase * raw_phase * (3.0 - 2.0 * raw_phase) * self.scenario
     )
     self.previous_target_pos_w.copy_(self.target_pos_w)
-    offset_w = self.forward_w[:, None, :] * (
-      self.extension * self.phase
-    )[:, None, None]
-    self.target_pos_w.copy_(self.start_pos_w + offset_w)
+    if self.scripted:
+      blend = self.phase[:, None, None]
+      self.target_pos_w.copy_(
+        self.start_pos_w + blend * (self.scripted_final_pos_w - self.start_pos_w)
+      )
+      start_quat = self.scripted_start_quat_w
+      final_quat = self.scripted_final_quat_w
+      final_quat = torch.where(
+        (start_quat * final_quat).sum(-1, keepdim=True) < 0,
+        -final_quat,
+        final_quat,
+      )
+      interpolated = (1.0 - blend) * start_quat + blend * final_quat
+      self.target_quat_w.copy_(
+        interpolated
+        / torch.linalg.norm(interpolated, dim=-1, keepdim=True).clamp_min(1e-6)
+      )
+    else:
+      offset_w = self.forward_w[:, None, :] * (
+        self.extension * self.phase
+      )[:, None, None]
+      self.target_pos_w.copy_(self.start_pos_w + offset_w)
     self.target_lin_vel_w.copy_(
       (self.target_pos_w - self.previous_target_pos_w) / self._env.step_dt
     )
+
+  def set_scripted_trajectory(
+    self,
+    position_offsets_b: torch.Tensor,
+    orientation_axis_angle_b: torch.Tensor | None = None,
+    *,
+    delay_s: float = 1.0,
+    duration_s: float = 2.0,
+    scenario_code: float = 1.0,
+  ) -> None:
+    """Install deterministic base-frame targets for held-out evaluation."""
+    expected = (self.num_envs, 2, 3)
+    if position_offsets_b.shape != expected:
+      raise ValueError(
+        f"Expected position offsets shaped {expected}, got {position_offsets_b.shape}."
+      )
+    start_pos = self.robot_wrist_pos_w.clone()
+    start_quat = self.robot_wrist_quat_w.clone()
+    root_quat = self.robot.data.root_link_quat_w[:, None, :].expand(-1, 2, -1)
+    offset_w = quat_apply(root_quat, position_offsets_b.to(self.device))
+
+    self.scripted = True
+    self.scripted_delay_s = delay_s
+    self.scripted_duration_s = duration_s
+    self.start_pos_w.copy_(start_pos)
+    self.target_pos_w.copy_(start_pos)
+    self.previous_target_pos_w.copy_(start_pos)
+    self.target_quat_w.copy_(start_quat)
+    self.scripted_start_quat_w.copy_(start_quat)
+    self.scripted_final_pos_w.copy_(start_pos + offset_w)
+    self.scripted_final_quat_w.copy_(start_quat)
+    if orientation_axis_angle_b is not None:
+      aa_w = quat_apply(root_quat, orientation_axis_angle_b.to(self.device))
+      angle = torch.linalg.norm(aa_w, dim=-1)
+      axis = aa_w / angle[..., None].clamp_min(1e-6)
+      delta = quat_from_angle_axis(angle, axis)
+      final = quat_mul(delta, start_quat)
+      self.scripted_final_quat_w.copy_(
+        torch.where((angle > 1e-6)[..., None], final, start_quat)
+      )
+    self.scenario.fill_(scenario_code)
+    self.extension.copy_(torch.linalg.norm(position_offsets_b, dim=-1).mean(-1))
+    self.elapsed.zero_()
+    self.phase.zero_()
+    self.target_lin_vel_w.zero_()
+    self.needs_initialization.zero_()
 
   def _update_metrics(self) -> None:
     pos_error = torch.linalg.norm(

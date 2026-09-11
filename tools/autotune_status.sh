@@ -18,6 +18,22 @@ else
     echo "Current trial: none"
 fi
 
+if [ -s "$STATE_DIR/STOP_REQUESTED" ]; then
+    echo
+    echo "Stop decision:"
+    sed 's/^/  /' "$STATE_DIR/STOP_REQUESTED"
+fi
+
+if [ -d "$STATE_DIR/pending" ]; then
+    PENDING_COUNT="$(find "$STATE_DIR/pending" -maxdepth 1 -type f | wc -l)"
+    echo "Pending analyses: $PENDING_COUNT"
+fi
+
+if [ -d "$STATE_DIR/groups" ]; then
+    GROUP_COUNT="$(find "$STATE_DIR/groups" -maxdepth 1 -name '*.json' -type f | wc -l)"
+    echo "Registered groups: $GROUP_COUNT"
+fi
+
 if [ -f "$STATE_DIR/watcher.log" ]; then
     echo
     echo "Recent watcher log:"

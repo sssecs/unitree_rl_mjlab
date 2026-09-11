@@ -93,7 +93,11 @@ Use:
 
 Example full training run:
 
-`./tools/remote_train.sh g1_baseline Unitree-G1-Flat --gpu-ids all --env.scene.num-envs=4096 --agent.logger tensorboard`
+`./tools/remote_train.sh g1_baseline Unitree-G1-Flat --gpu-ids all --env.scene.num-envs=1024 --agent.logger tensorboard`
+
+`--env.scene.num-envs` is per training process/GPU. Therefore four-GPU DDP
+with `num-envs=1024` uses 4,096 environments globally; `num-envs=4096` uses
+16,384 globally. Always report both per-rank and total environment counts.
 
 Use descriptive session names, for example:
 
@@ -105,6 +109,14 @@ Use descriptive session names, for example:
 * `g1_dr_friction_v3`
 
 Do not reuse the same session name for different experiments.
+
+`remote_train.sh` records the Git commit, dirty status/binary diff, hashes of
+all synchronized files, an archive of untracked files, exact arguments,
+resolved environment and agent YAML, rank seeds, per-rank/global environment
+counts, and the actual TensorBoard log directory under
+`.autotune/<session>/`. Formal runs should normally start from a clean committed
+tree; this provenance bundle is a safeguard, not a replacement for version
+control.
 
 ---
 
@@ -134,17 +146,21 @@ Do not launch a full 4-GPU run if the small validation run is broken.
 
 # Full training
 
-For normal full training use:
+For a normal full DDP training run with 4,096 environments globally use:
 
-`./tools/remote_train.sh <session-name> Unitree-G1-Flat --gpu-ids all --env.scene.num-envs=4096 --agent.logger tensorboard`
+`./tools/remote_train.sh <session-name> Unitree-G1-Flat --gpu-ids all --env.scene.num-envs=1024 --agent.logger tensorboard`
 
 Before starting a full run, check the remote status:
 
 `./tools/remote_status.sh`
 
-Do not start another full 4-GPU experiment if one is already using all GPUs.
+Do not start another full 4-GPU DDP experiment if one is already using all GPUs.
 
-Only one full 4-GPU experiment should run at a time unless explicitly instructed otherwise.
+For controlled screening or multi-seed confirmation, four independent one-GPU
+runs may be launched as one registered group with `tools/remote_sweep.py`.
+Within a group, use distinct GPUs and analyze all siblings together. Same-seed
+screening ranks parameter candidates; final claims require independent training
+seeds and/or the fixed held-out evaluator.
 
 ---
 
@@ -217,6 +233,10 @@ Important metrics include:
 Do not judge an experiment only from terminal output.
 
 Prefer quantitative comparison between experiments.
+
+Do not declare a best policy from small single-seed differences. Use a
+same-seed four-way group for parameter screening, then confirm the winner with
+at least three independent training seeds and the unchanged held-out evaluator.
 
 ---
 

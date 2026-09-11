@@ -61,7 +61,8 @@ def unitree_g1_wrist_recovery_env_cfg(
   play: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   cfg = unitree_g1_flat_env_cfg(play=False)
-  cfg.scene.num_envs = 64 if play else 4096
+  # This value is per process. Four-GPU DDP therefore uses 4,096 envs globally.
+  cfg.scene.num_envs = 64 if play else 1024
   cfg.episode_length_s = 12.0
 
   teacher = _teacher_observations()
