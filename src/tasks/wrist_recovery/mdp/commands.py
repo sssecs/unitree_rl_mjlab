@@ -30,6 +30,10 @@ class BimanualWristCommand(CommandTerm):
 
   def __init__(self, cfg: BimanualWristCommandCfg, env: ManagerBasedRlEnv):
     super().__init__(cfg, env)
+    if not 0.0 <= cfg.reach_probability <= 1.0:
+      raise ValueError("reach_probability must be in [0, 1].")
+    if not 0.0 <= cfg.asymmetric_probability <= 1.0:
+      raise ValueError("asymmetric_probability must be in [0, 1].")
     self.robot: Entity = env.scene[cfg.entity_name]
     wrist_ids, names = self.robot.find_bodies(
       cfg.wrist_body_names, preserve_order=True
@@ -51,8 +55,12 @@ class BimanualWristCommand(CommandTerm):
     self.target_lin_vel_w = torch.zeros(shape, device=self.device)
     self.target_quat_w = torch.zeros(self.num_envs, 2, 4, device=self.device)
     self.target_quat_w[..., 0] = 1.0
-    self.forward_w = torch.zeros(self.num_envs, 3, device=self.device)
+    self.sampled_offset_b = torch.zeros(shape, device=self.device)
+    self.sampled_axis_angle_b = torch.zeros(shape, device=self.device)
     self.scenario = torch.zeros(self.num_envs, device=self.device)
+    self.is_asymmetric = torch.zeros(
+      self.num_envs, dtype=torch.bool, device=self.device
+    )
     self.extension = torch.zeros(self.num_envs, device=self.device)
     self.elapsed = torch.zeros(self.num_envs, device=self.device)
     self.phase = torch.zeros(self.num_envs, device=self.device)
@@ -60,9 +68,9 @@ class BimanualWristCommand(CommandTerm):
       self.num_envs, dtype=torch.bool, device=self.device
     )
     self.scripted = False
-    self.scripted_final_pos_w = torch.zeros(shape, device=self.device)
-    self.scripted_start_quat_w = self.target_quat_w.clone()
-    self.scripted_final_quat_w = self.target_quat_w.clone()
+    self.final_pos_w = torch.zeros(shape, device=self.device)
+    self.start_quat_w = self.target_quat_w.clone()
+    self.final_quat_w = self.target_quat_w.clone()
     self.scripted_delay_s = cfg.reach_delay_s
     self.scripted_duration_s = cfg.reach_duration_s
 
@@ -72,6 +80,7 @@ class BimanualWristCommand(CommandTerm):
       "wrist_rot_error_mean",
       "inter_wrist_error",
       "foot_stagger",
+      "asymmetric_fraction",
     ):
       self.metrics[key] = torch.zeros(self.num_envs, device=self.device)
 
@@ -145,6 +154,34 @@ class BimanualWristCommand(CommandTerm):
     ).float()
     self.extension[env_ids].uniform_(*self.cfg.extension_range)
     self.extension[env_ids] *= self.scenario[env_ids] * curriculum
+    offsets = torch.zeros(len(env_ids), 2, 3, device=self.device)
+    offsets[..., 0] = self.extension[env_ids, None]
+    axis_angles = torch.zeros_like(offsets)
+    asymmetric = (
+      torch.rand(len(env_ids), device=self.device)
+      < self.cfg.asymmetric_probability
+    ) & (self.scenario[env_ids] > 0)
+    num_asymmetric = int(asymmetric.sum().item())
+    if num_asymmetric > 0:
+      asymmetric_offsets = torch.empty(
+        num_asymmetric, 2, 3, device=self.device
+      )
+      asymmetric_offsets[..., 0].uniform_(*self.cfg.extension_range)
+      asymmetric_offsets[..., 1].uniform_(*self.cfg.lateral_offset_range)
+      asymmetric_offsets[..., 2].uniform_(*self.cfg.vertical_offset_range)
+      offsets[asymmetric] = asymmetric_offsets * curriculum
+
+      random_axes = torch.randn(num_asymmetric, 2, 3, device=self.device)
+      random_axes /= torch.linalg.norm(
+        random_axes, dim=-1, keepdim=True
+      ).clamp_min(1.0e-6)
+      angles = torch.empty(num_asymmetric, 2, 1, device=self.device)
+      angles.uniform_(*self.cfg.orientation_angle_range)
+      axis_angles[asymmetric] = random_axes * angles * curriculum
+    self.sampled_offset_b[env_ids] = offsets
+    self.sampled_axis_angle_b[env_ids] = axis_angles
+    self.is_asymmetric[env_ids] = asymmetric
+    self.extension[env_ids] = torch.linalg.norm(offsets, dim=-1).mean(-1)
     self.elapsed[env_ids] = 0.0
     self.phase[env_ids] = 0.0
     self.target_lin_vel_w[env_ids] = 0.0
@@ -160,16 +197,21 @@ class BimanualWristCommand(CommandTerm):
       self.start_pos_w[pending] = wrist_pos
       self.target_pos_w[pending] = wrist_pos
       self.previous_target_pos_w[pending] = wrist_pos
-      self.target_quat_w[pending] = self.robot_wrist_quat_w[pending]
-      forward_b = torch.zeros(len(pending), 3, device=self.device)
-      forward_b[:, 0] = 1.0
-      self.forward_w[pending] = quat_apply(
-        self.robot.data.root_link_quat_w[pending], forward_b
+      wrist_quat = self.robot_wrist_quat_w[pending]
+      self.target_quat_w[pending] = wrist_quat
+      self.start_quat_w[pending] = wrist_quat
+      root_quat = self.robot.data.root_link_quat_w[pending, None, :].expand(
+        -1, 2, -1
       )
-      self.forward_w[pending, 2] = 0.0
-      self.forward_w[pending] /= torch.linalg.norm(
-        self.forward_w[pending], dim=-1, keepdim=True
-      ).clamp_min(1.0e-6)
+      offset_w = quat_apply(root_quat, self.sampled_offset_b[pending])
+      self.final_pos_w[pending] = wrist_pos + offset_w
+      aa_w = quat_apply(root_quat, self.sampled_axis_angle_b[pending])
+      angle = torch.linalg.norm(aa_w, dim=-1)
+      axis = aa_w / angle[..., None].clamp_min(1.0e-6)
+      final_quat = quat_mul(quat_from_angle_axis(angle, axis), wrist_quat)
+      self.final_quat_w[pending] = torch.where(
+        (angle > 1.0e-6)[..., None], final_quat, wrist_quat
+      )
       self.elapsed[pending] = 0.0
       self.needs_initialization[pending] = False
 
@@ -183,28 +225,20 @@ class BimanualWristCommand(CommandTerm):
       raw_phase * raw_phase * (3.0 - 2.0 * raw_phase) * self.scenario
     )
     self.previous_target_pos_w.copy_(self.target_pos_w)
-    if self.scripted:
-      blend = self.phase[:, None, None]
-      self.target_pos_w.copy_(
-        self.start_pos_w + blend * (self.scripted_final_pos_w - self.start_pos_w)
-      )
-      start_quat = self.scripted_start_quat_w
-      final_quat = self.scripted_final_quat_w
-      final_quat = torch.where(
-        (start_quat * final_quat).sum(-1, keepdim=True) < 0,
-        -final_quat,
-        final_quat,
-      )
-      interpolated = (1.0 - blend) * start_quat + blend * final_quat
-      self.target_quat_w.copy_(
-        interpolated
-        / torch.linalg.norm(interpolated, dim=-1, keepdim=True).clamp_min(1e-6)
-      )
-    else:
-      offset_w = self.forward_w[:, None, :] * (
-        self.extension * self.phase
-      )[:, None, None]
-      self.target_pos_w.copy_(self.start_pos_w + offset_w)
+    blend = self.phase[:, None, None]
+    self.target_pos_w.copy_(
+      self.start_pos_w + blend * (self.final_pos_w - self.start_pos_w)
+    )
+    final_quat = torch.where(
+      (self.start_quat_w * self.final_quat_w).sum(-1, keepdim=True) < 0,
+      -self.final_quat_w,
+      self.final_quat_w,
+    )
+    interpolated = (1.0 - blend) * self.start_quat_w + blend * final_quat
+    self.target_quat_w.copy_(
+      interpolated
+      / torch.linalg.norm(interpolated, dim=-1, keepdim=True).clamp_min(1e-6)
+    )
     self.target_lin_vel_w.copy_(
       (self.target_pos_w - self.previous_target_pos_w) / self._env.step_dt
     )
@@ -236,19 +270,25 @@ class BimanualWristCommand(CommandTerm):
     self.target_pos_w.copy_(start_pos)
     self.previous_target_pos_w.copy_(start_pos)
     self.target_quat_w.copy_(start_quat)
-    self.scripted_start_quat_w.copy_(start_quat)
-    self.scripted_final_pos_w.copy_(start_pos + offset_w)
-    self.scripted_final_quat_w.copy_(start_quat)
+    self.start_quat_w.copy_(start_quat)
+    self.final_pos_w.copy_(start_pos + offset_w)
+    self.final_quat_w.copy_(start_quat)
     if orientation_axis_angle_b is not None:
       aa_w = quat_apply(root_quat, orientation_axis_angle_b.to(self.device))
       angle = torch.linalg.norm(aa_w, dim=-1)
       axis = aa_w / angle[..., None].clamp_min(1e-6)
       delta = quat_from_angle_axis(angle, axis)
       final = quat_mul(delta, start_quat)
-      self.scripted_final_quat_w.copy_(
+      self.final_quat_w.copy_(
         torch.where((angle > 1e-6)[..., None], final, start_quat)
       )
     self.scenario.fill_(scenario_code)
+    self.is_asymmetric.copy_(
+      (position_offsets_b[:, 0] - position_offsets_b[:, 1])
+      .abs()
+      .amax(dim=-1)
+      > 1.0e-6
+    )
     self.extension.copy_(torch.linalg.norm(position_offsets_b, dim=-1).mean(-1))
     self.elapsed.zero_()
     self.phase.zero_()
@@ -274,6 +314,7 @@ class BimanualWristCommand(CommandTerm):
     )
     feet = self.robot.data.body_link_pos_w[:, self.foot_body_ids]
     self.metrics["foot_stagger"] = torch.abs(feet[:, 0, 0] - feet[:, 1, 0])
+    self.metrics["asymmetric_fraction"] = self.is_asymmetric.float()
 
 
 @dataclass(kw_only=True)
@@ -282,7 +323,11 @@ class BimanualWristCommandCfg(CommandTermCfg):
   wrist_body_names: tuple[str, str]
   foot_body_names: tuple[str, str]
   reach_probability: float = 0.5
+  asymmetric_probability: float = 0.0
   extension_range: tuple[float, float] = (0.12, 0.28)
+  lateral_offset_range: tuple[float, float] = (-0.10, 0.10)
+  vertical_offset_range: tuple[float, float] = (-0.06, 0.06)
+  orientation_angle_range: tuple[float, float] = (-0.25, 0.25)
   reach_delay_s: float = 1.0
   reach_duration_s: float = 2.0
   curriculum_warmup_steps: int = 30_000

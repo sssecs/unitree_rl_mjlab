@@ -79,14 +79,16 @@ environments. Only after it initializes, produces finite rewards, and starts PPO
 successfully may you launch a full 4-GPU run. Remember that
 `--env.scene.num-envs` is per rank: use 1,024 per rank for 4,096 environments
 globally, and report both counts. Validation runs do not count toward the
-five-full-run budget.
+active stage budget.
 
 Do not start another full 4-GPU run if one is already active.
 
 Stop instead of launching another experiment when any of these applies:
 - all requested acceptance metrics have been met;
-- five full training runs have been completed;
-- three consecutive full runs fail to improve the key wrist/balance metrics;
+- the active stage budget recorded in `experiments/autotune_journal.md` has
+  been exhausted;
+- two consecutive registered experiment groups fail to improve the targeted
+  held-out wrist/balance metrics;
 - the next step requires a material design decision from the user;
 - evidence is insufficient to justify a controlled next experiment.
 

@@ -480,3 +480,30 @@
   then deleting one temporary managed file. The second sync pruned exactly that
   path. A subsequent read-only audit found no extra files under remote `src`,
   `scripts`, `tools`, or `experiments`.
+
+### Stage 3 screen planned (`g1_stage3_screen_v1`)
+
+- Hypothesis: the retained policy fails held-out reach because training only
+  presents bilateral forward translations. Continuously sampled independent
+  wrist x/y/z offsets and modest rotations should teach proactive whole-body
+  support for asymmetric targets; increasing the fraction of reach episodes
+  may improve this further, provided static/load/push skills do not regress.
+- Change: add an `asymmetric_probability` command parameter. Asymmetric reach
+  episodes independently sample each wrist from x 0.12--0.28 m, y
+  -0.10--0.10 m, z -0.06--0.06 m and random-axis rotation -0.25--0.25 rad.
+  Sampling is continuous and does not replay the fixed held-out tuples.
+- Controlled screen: four independent one-GPU runs cross reach probability
+  0.50/0.80 and asymmetric probability 0.00/0.50. All use seed 1201, 4,096
+  environments per run, and 5,000 iterations. The shared seed ranks the four
+  configurations but does not support a final best-policy claim.
+- Active Stage 3 budget: this four-run screen plus, only if promoted by the
+  unchanged held-out suite, one confirmation group with at least three new
+  training seeds. The earlier five-run cap applied to the completed yaw-reward
+  pilot and is no longer the stopping rule for this new stage.
+- Validation: `g1_stage3_asym_smoke_v1` completed two finite PPO iterations
+  with 256 environments but, correctly, sampled no reaches during the 30k-step
+  curriculum warmup. `g1_stage3_asym_active_smoke_v2` therefore set warmup to
+  zero and ramp to one for five iterations. It exited 0, remained finite, and
+  reported asymmetric fractions rising to 0.435 (the configured expectation is
+  `0.80 * 0.50 = 0.40`), proving the new target branch was exercised.
+- Status: validation passed; four-run screen ready to launch.

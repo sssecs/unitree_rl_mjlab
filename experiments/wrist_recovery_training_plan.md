@@ -75,6 +75,15 @@ training work should therefore target Stage 3 reach/support diversity, while
 retaining mastered Stage 0--2 cases to prevent forgetting. Establish robust
 suite numbers before claiming readiness for Stage 4.
 
+The active Stage 3 budget is one four-candidate, fixed-seed screen followed by
+one independent-seed confirmation group for the promoted configuration. The
+screen is defined in `experiments/stage3_screen_v1.json`: it crosses reach
+probability 0.50/0.80 with asymmetric-target probability 0.00/0.50. Each run
+uses one H20, 4,096 environments, seed 1201, and 5,000 PPO iterations. This is
+a candidate-ranking experiment, not multi-seed evidence. Do not launch the
+confirmation group unless the fixed held-out suite shows a useful improvement
+without regression of the already-passed static, payload, and push gates.
+
 Example:
 
 ```bash
