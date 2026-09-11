@@ -1,0 +1,424 @@
+# G1 wrist-recovery autotune journal
+
+## Operating constraints
+
+- Pure reinforcement learning only for this phase.
+- Change one conceptual factor per controlled experiment when practical.
+- Validate risky changes on one GPU with 256 environments before a full run.
+- At most five full 4-GPU runs; validation runs do not count.
+- Stop after three consecutive full runs without improvement, after meeting the
+  acceptance criteria, or when a material user decision is needed.
+
+## Experiments
+
+### `g1_wrist_recovery_v0_smoke`
+
+- Type: 1-GPU launcher smoke test, 256 environments, 10 iterations.
+- Result: failed before Python startup with exit code 126 because the tracked
+  `run_train.sh` has no executable bit while `remote_train.sh` invoked it as an
+  executable.
+- Decision: invoke the required launcher as `bash ./run_train.sh`; no RL change.
+
+### `g1_wrist_recovery_v0_smoke2`
+
+- Type: 1-GPU environment smoke test, 256 environments, 10 iterations.
+- Result: CUDA, Warp, and the base environment initialized, then command-manager
+  construction failed because `heading_command=False` retained a non-null
+  heading range inherited from the velocity task.
+- Decision: explicitly set `twist.ranges.heading = None`; no RL change.
+
+### `g1_wrist_recovery_v0_smoke3`
+
+- Hypothesis: explicitly clearing the inherited heading range would allow all
+  managers to construct and PPO to begin on the wrist-recovery environment.
+- Exact change under test: `twist.ranges.heading = None`; no reward or PPO
+  hyperparameter was changed.
+- Status: 1-GPU validation with 256 environments and 10 iterations; failed with
+  exit code 1 before PPO startup, so no full run was launched.
+- Result: CUDA, Warp, MuJoCo, the base environment, and the command, action,
+  observation, and termination managers initialized successfully. Reward-manager
+  construction then raised `TypeError: object of type 'NoneType' has no len()`:
+  `electrical_power_cost` attempted to resolve `joint_names=None`. The run
+  produced no TensorBoard event file or checkpoint, so it neither diverged nor
+  generated finite training metrics to evaluate.
+- Baseline comparison: no useful training baseline exists yet; this run made it
+  one manager farther than `g1_wrist_recovery_v0_smoke2` but still did not reach
+  PPO. It does not count toward the five-full-run budget.
+- Decision: classify as a code/configuration crash. Select all robot joints only
+  for the energy term with
+  `SceneEntityCfg("robot", joint_names=(r".*",))`, then repeat the same 1-GPU,
+  256-environment, 10-iteration validation as
+  `g1_wrist_recovery_v0_smoke4`. No RL parameter will be tuned until the task
+  initializes and emits finite rollout/training metrics.
+
+### `g1_wrist_recovery_v0_smoke4`
+
+- Hypothesis: selecting all robot joints explicitly for `electrical_power_cost`
+  would let reward-manager construction finish and allow finite PPO training to
+  begin.
+- Exact change under test: the energy reward's asset selector is
+  `SceneEntityCfg("robot", joint_names=(r".*",))`; all reward weights, PPO
+  settings, commands, curricula, and disturbances remained unchanged.
+- Status: successful 1-GPU validation with 256 environments and 10 iterations;
+  exit code 0. It initialized CUDA, Warp, MuJoCo, every environment manager, and
+  PPO, then completed all 81,920 simulation steps at about 5,800 steps/s.
+- Result: training was finite with no exceptions or NaNs. TensorBoard contains
+  10 samples for every key scalar. At iteration 9, mean reward was 0.459, mean
+  episode length was 66.42 steps, value loss was 0.493, surrogate loss was
+  -0.0274, policy standard deviation was 0.201, mean wrist-position error was
+  0.710 m, peak wrist-position error was 0.754 m, wrist-rotation error was 0.798
+  rad, inter-wrist error was 0.168 m, mean action acceleration was 0.403, and
+  foot stagger was 0.161 m. Bad-orientation terminations were 4.44 per episode
+  batch and base-height terminations were 0.188. The worsening errors relative
+  to iteration 0 occurred during only ten startup iterations and are not treated
+  as convergence or divergence. TensorBoard was written under
+  `logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_08-38-32`; checkpoints
+  `model_0.pt` and `model_9.pt` are present.
+- Baseline comparison: no useful trained baseline exists. Unlike smoke3, this
+  run passed the previously failing reward-manager boundary and demonstrated
+  finite rollout collection and PPO updates. It is validation only and does not
+  count toward the five-full-run budget.
+- Decision: the source/configuration fix is validated. Launched the unchanged
+  first full baseline as `g1_wrist_recovery_v0_full1` in detached remote tmux
+  on all four GPUs with
+  4,096 environments and 5,000 iterations. The hypothesis is that the staged
+  30,000-step quiet-hold warmup and 60,000-step reach/payload/push ramp give PPO
+  enough curriculum to learn wrist holding and balance recovery. Do not tune a
+  reward or PPO parameter before establishing this baseline.
+
+### `g1_wrist_recovery_v0_full1`
+
+- Hypothesis: the staged 30,000-control-step quiet-hold warmup followed by the
+  60,000-step reach, payload, and push ramp would let the initial PPO setup learn
+  accurate bimanual wrist holding while retaining balance recovery.
+- Exact change under test: none relative to the successful `v0_smoke4`
+  validation. This was the first full baseline, using the initial wrist-recovery
+  reward configuration and PPO settings.
+- Status: successful full 4-GPU run with 4,096 environments and 5,000
+  iterations; exit code 0. All workers completed normally in 3:15:44 after
+  2,621,440,000 environment steps. This is full run 1 of the five-run budget.
+- Result: no traceback, code/configuration failure, infrastructure failure, NaN,
+  or non-finite TensorBoard scalar was found. The run directory is
+  `logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_08-43-32`; it contains the
+  TensorBoard event file and checkpoints every 100 iterations plus
+  `model_4999.pt`. Over the final 100 iterations, mean reward was 136.819 and
+  mean episode length was 599.88/600. Mean wrist-position error was 0.00222 m,
+  peak wrist error 0.01707 m, wrist-rotation error 0.05721 rad, inter-wrist error
+  0.00255 m, and foot stagger 0.16119 m. Mean action acceleration was 0.50665;
+  foot-slide reward contribution was -0.00277 and action-rate contribution was
+  -0.20098. Base-height and bad-orientation terminations averaged 0.00344 and
+  0.000625 per logged episode batch. All of these scalars were finite. The
+  remaining conspicuous balance/tracking weakness was zero-command yaw-rate
+  error at 0.43369 versus horizontal-velocity error at 0.10635.
+- Baseline comparison: this is the first useful full baseline. Relative to the
+  10-iteration smoke validation, it progressed from startup behavior (0.710 m
+  wrist-position error, 66.42-step episodes) to stable full-length episodes and
+  millimeter-scale mean wrist error under the fully ramped task. The smoke run
+  is not a trained comparator, so no causal improvement claim is made.
+- Best checkpoint/result: retain `model_4999.pt` as the baseline checkpoint. Its
+  final values (0.00199 m mean wrist-position error, 0.01678 m peak error,
+  0.05537 rad rotation error, 0.00235 m inter-wrist error, and no final-batch
+  base-height or bad-orientation termination) are representative of the stable
+  final-100 window rather than an isolated spike.
+- Decision: continue because only one full run has completed and one controlled
+  weakness is supported by the metrics. Test the hypothesis that strengthening
+  the zero-yaw stabilization signal will reduce yaw-rate error without degrading
+  wrist tracking, survival, recovery stepping, or action smoothness. Change only
+  `base_yaw_rate` reward weight from -0.1 to -0.5. Because this is a reward
+  change, `g1_wrist_recovery_yawpen_v1_val` was launched in detached remote tmux
+  on one GPU with 256 environments for 10 iterations. Its result is pending;
+  launch a second full run only in the next completion-triggered turn if this
+  validation initializes and starts finite PPO.
+
+### `g1_wrist_recovery_yawpen_v1_val`
+
+- Hypothesis: increasing the zero-command base-yaw-rate penalty from -0.1 to
+  -0.5 will give the policy a stronger yaw-stabilization signal without
+  breaking environment initialization, PPO learning, wrist tracking, balance,
+  or action smoothness.
+- Exact change under test: only the `base_yaw_rate` reward weight changed from
+  -0.1 to -0.5. Commands, curricula, disturbances, all other reward weights,
+  and PPO settings remained unchanged.
+- Status: successful 1-GPU validation with 256 environments and 10 iterations;
+  exit code 0. CUDA, Warp, MuJoCo, all environment managers, rollout
+  collection, and PPO initialized and completed normally. This validation does
+  not count toward the five-full-run budget.
+- Result: all 81,920 simulation steps completed at 6,120 steps/s on the final
+  iteration. The run produced a TensorBoard event file with 10 samples for
+  every key scalar and checkpoints `model_0.pt` and `model_9.pt` under
+  `logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_12-07-19`. No traceback,
+  exception, NaN, or non-finite scalar was found. At iteration 9, mean reward
+  was 0.0474, mean episode length 66.36 steps, surrogate loss -0.02638, mean
+  wrist-position error 0.7144 m, peak wrist error 0.7534 m, wrist-rotation
+  error 0.8167 rad, inter-wrist error 0.1777 m, mean action acceleration
+  0.4000, horizontal-velocity error 0.0938, yaw-rate error 0.1000, and foot
+  stagger 0.1400 m. Base-height and bad-orientation terminations were 0.3125
+  and 4.0625 per logged episode batch. The low reward and short episodes are
+  normal startup behavior in this deliberately short validation, not evidence
+  of divergence or converged performance.
+- Baseline comparison: compared with the original successful 10-iteration
+  `v0_smoke4` validation, final yaw-rate error was effectively unchanged
+  (0.1000 versus 0.1009), as were mean episode length (66.36 versus 66.42),
+  wrist-position error (0.7144 versus 0.7099), and action acceleration (0.4000
+  versus 0.4027). Total reward is lower (0.0474 versus 0.4592) because the
+  tested penalty has a larger negative scale; that expected accounting change
+  is not used as a quality comparison. Ten startup iterations are sufficient
+  for safety validation but not for testing the yaw-stabilization hypothesis.
+- Decision: the reward change is safe enough for a controlled full comparison,
+  and remote status showed no tmux sessions or GPU processes. Launch full run 2
+  of at most five as `g1_wrist_recovery_yawpen_v1_full2` on all four GPUs with
+  4,096 environments and 5,000 iterations. Compare its final-window yaw-rate
+  error, wrist errors, terminations, foot stagger/slide, and action acceleration
+  directly against `g1_wrist_recovery_v0_full1`; do not infer improvement from
+  total reward because its scale changed.
+
+### `g1_wrist_recovery_yawpen_v1_full2`
+
+- Hypothesis: increasing the zero-command base-yaw-rate penalty from -0.1 to
+  -0.5 would reduce yaw drift without degrading wrist tracking, survival,
+  recovery stepping, foot behavior, or action smoothness.
+- Exact change under test: only `base_yaw_rate` reward weight changed from -0.1
+  to -0.5 relative to `g1_wrist_recovery_v0_full1`. Commands, curricula,
+  disturbances, all other reward weights, and PPO settings were unchanged. The
+  preceding `g1_wrist_recovery_yawpen_v1_val` validation passed.
+- Status: successful full 4-GPU run with 4,096 environments and 5,000
+  iterations; exit code 0. All workers completed normally in 3:16:41 after
+  2,621,440,000 environment steps. This is full run 2 of the five-run budget.
+- Result: training was finite and stable. The run produced 5,000 samples for
+  each of 50 TensorBoard scalars with no non-finite values, plus 51 checkpoints
+  through `model_4999.pt`, under
+  `logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_12-12-08`. Over the final
+  100 iterations, mean reward was 136.616, mean episode length was 599.978/600,
+  value loss was 0.01307, surrogate loss was -0.00321, and policy standard
+  deviation was 0.22155. Mean wrist-position error was 0.00217 m, peak wrist
+  error 0.01693 m, wrist-rotation error 0.05732 rad, inter-wrist error 0.00261
+  m, horizontal-velocity error 0.10824, yaw-rate error 0.36214, foot stagger
+  0.14617 m, and mean action acceleration 0.49371. Action-rate and foot-slide
+  reward contributions were -0.19718 and -0.00262. Base-height and
+  bad-orientation terminations averaged 0.000625 and 0 per logged episode batch.
+  A SIGTERM traceback emitted only during torchrun cleanup after “All workers
+  completed successfully” and “Workers exited without errors”; it did not
+  affect the exit code, metrics, event file, or final checkpoint and is not
+  classified as a code, training, or infrastructure failure.
+- Baseline comparison: versus the final-100 window of
+  `g1_wrist_recovery_v0_full1`, yaw-rate error improved 16.5% (0.43369 to
+  0.36214), action acceleration improved 2.6% (0.50665 to 0.49371), foot
+  stagger improved 9.3% (0.16119 to 0.14617), and foot-slide cost magnitude
+  improved 5.3% (0.00277 to 0.00262). Mean and peak wrist-position errors
+  improved 2.4% and 0.8%; wrist-rotation error was effectively unchanged
+  (+0.2%), while inter-wrist error and horizontal-velocity error regressed
+  slightly (+2.4% and +1.8%). Episode length was unchanged at effectively the
+  600-step maximum, and rare orientation/height terminations did not worsen.
+  Total reward is not treated as a quality comparison because its scale changed.
+- Best checkpoint/result: retain this run's `model_4999.pt` as the current best
+  result because it materially improves the targeted yaw metric and also
+  improves smoothness and foot behavior without a meaningful wrist or survival
+  tradeoff.
+- Decision: continue; two full runs have completed, the latest improved the key
+  balance metric, and yaw error remains the largest conspicuous weakness. Test
+  whether a smaller second strengthening step preserves those gains while
+  reducing yaw further by changing only `base_yaw_rate` from -0.5 to -1.0.
+  Because this is a reward change, launch `g1_wrist_recovery_yawpen_v2_val` as
+  a 1-GPU, 256-environment, 10-iteration validation. Only a later
+  completion-triggered turn may launch full run 3 after verifying finite PPO.
+
+### `g1_wrist_recovery_yawpen_v2_val`
+
+- Hypothesis: increasing the zero-command base-yaw-rate penalty from -0.5 to
+  -1.0 will provide a further yaw-stabilization signal without breaking
+  environment initialization, finite PPO learning, wrist tracking, balance, or
+  action smoothness.
+- Exact change under test: only `base_yaw_rate` reward weight changed from -0.5
+  to -1.0 relative to `g1_wrist_recovery_yawpen_v1_full2`. Commands,
+  curricula, disturbances, all other reward weights, and PPO settings remained
+  unchanged.
+- Status: successful 1-GPU validation with 256 environments and 10 iterations;
+  exit code 0. CUDA, Warp, MuJoCo, all environment managers, rollout
+  collection, and PPO initialized and completed normally. This validation does
+  not count toward the five-full-run budget.
+- Result: all 81,920 simulation steps completed, reaching 5,972 steps/s on the
+  final iteration. The run produced 10 samples for each of 50 TensorBoard
+  scalars, all finite, and checkpoints `model_0.pt` and `model_9.pt` under
+  `logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_15-38-00`. No traceback,
+  exception, NaN, or non-finite scalar was found. At iteration 9, mean reward
+  was -0.2355, mean episode length 66.12 steps, value loss 0.4381, surrogate
+  loss -0.02845, mean wrist-position error 0.7106 m, peak wrist error 0.7518 m,
+  wrist-rotation error 0.8050 rad, inter-wrist error 0.1613 m, mean action
+  acceleration 0.4010, horizontal-velocity error 0.0931, yaw-rate error 0.1013,
+  and foot stagger 0.1435 m. Base-height and bad-orientation terminations were
+  0.0625 and 4.53125 per logged episode batch.
+- Baseline comparison: compared with `g1_wrist_recovery_yawpen_v1_val` at
+  iteration 9, startup behavior was effectively unchanged: yaw-rate error was
+  0.1013 versus 0.1000, episode length 66.12 versus 66.36, wrist-position error
+  0.7106 versus 0.7144, action acceleration 0.4010 versus 0.4000, and foot
+  stagger 0.1435 versus 0.1400 m. The lower total reward (-0.2355 versus
+  0.0474) is the expected accounting effect of the stronger negative reward
+  weight and is not treated as a quality regression. Ten startup iterations
+  validate safety and finite optimization, not the yaw hypothesis itself.
+- Decision: the controlled reward change passed validation. Remote status
+  showed no tmux sessions, no GPU processes, and all four GPUs idle. Launched
+  full run 3 of at most five as `g1_wrist_recovery_yawpen_v2_full3` with 4,096
+  environments and 5,000 iterations on all four GPUs. Compare its final-100
+  yaw-rate error, wrist errors, terminations, foot stagger/slide, horizontal
+  velocity, and action acceleration directly against
+  `g1_wrist_recovery_yawpen_v1_full2`; do not compare total reward across the
+  changed reward scales.
+
+### `g1_wrist_recovery_yawpen_v2_full3`
+
+- Hypothesis: increasing the zero-command base-yaw-rate penalty from -0.5 to
+  -1.0 would further reduce yaw drift without materially degrading wrist
+  tracking, survival, recovery stepping, foot behavior, or action smoothness.
+- Exact change under test: only `base_yaw_rate` reward weight changed from -0.5
+  to -1.0 relative to `g1_wrist_recovery_yawpen_v1_full2`. Commands,
+  curricula, disturbances, all other reward weights, and PPO settings were
+  unchanged. The preceding `g1_wrist_recovery_yawpen_v2_val` validation passed.
+- Status: successful full 4-GPU run with 4,096 environments and 5,000
+  iterations; exit code 0. All workers completed normally in 3:14:47 after
+  2,621,440,000 environment steps. This is full run 3 of the five-run budget.
+- Result: training was finite and stable. The run produced 5,000 samples for
+  each of 50 TensorBoard scalars with no non-finite values, plus 51 checkpoints
+  through `model_4999.pt`, under
+  `logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_15-42-56`. Over the final
+  100 iterations, mean reward was 135.786, mean episode length was 599.953/600,
+  value loss was 0.01508, surrogate loss was -0.00320, and policy standard
+  deviation was 0.22974. Mean wrist-position error was 0.00237 m, peak wrist
+  error 0.01661 m, wrist-rotation error 0.06116 rad, inter-wrist error 0.00279
+  m, horizontal-velocity error 0.11007, yaw-rate error 0.33685, foot stagger
+  0.14380 m, and mean action acceleration 0.50870. Action-rate and foot-slide
+  reward contributions were -0.21485 and -0.00300. Base-height and
+  bad-orientation terminations averaged 0 and 0.00156 per logged episode batch.
+  The log ends with all workers completing successfully and contains no
+  traceback, training failure, or infrastructure failure.
+- Baseline comparison: versus the final-100 window of
+  `g1_wrist_recovery_yawpen_v1_full2`, yaw-rate error improved another 7.0%
+  (0.36214 to 0.33685) and foot stagger improved 1.6% (0.14617 to 0.14380 m).
+  Peak wrist error improved 1.9% (0.01693 to 0.01661 m). However, mean action
+  acceleration regressed 3.0% (0.49371 to 0.50870), foot-slide cost magnitude
+  regressed 14.5% (0.00262 to 0.00300), mean wrist-position error regressed
+  9.1% (0.00217 to 0.00237 m), wrist-rotation error regressed 6.7% (0.05732 to
+  0.06116 rad), and inter-wrist error regressed 7.0% (0.00261 to 0.00279 m).
+  Horizontal-velocity error regressed 1.7%; episode length remained effectively
+  maximal, and rare termination rates did not materially change. Total reward
+  is not used for comparison because the reward scale changed.
+- Best checkpoint/result: retain
+  `g1_wrist_recovery_yawpen_v1_full2`'s `model_4999.pt` as the best balanced
+  checkpoint; this run's `model_4999.pt` is the best yaw-specialized result but
+  pays measurable smoothness, foot-slide, and wrist-tracking costs.
+- Decision: continue because three full runs have completed, the latest still
+  improved the targeted yaw metric, and the two tested weights bracket a clear
+  tradeoff. Test the single midpoint `base_yaw_rate=-0.75`: the hypothesis is
+  that it will retain most of the -1.0 yaw gain while recovering the superior
+  action smoothness, foot sliding, and wrist tracking seen at -0.5. Because
+  this is a reward change, remote status was checked and showed no tmux
+  sessions, no GPU processes, and all four GPUs idle. Launched
+  `g1_wrist_recovery_yawpen_v3_mid075_val` as a 1-GPU, 256-environment,
+  10-iteration validation; its result is pending. Only a later
+  completion-triggered turn may launch full run 4 after verifying finite PPO.
+
+### `g1_wrist_recovery_yawpen_v3_mid075_val`
+
+- Hypothesis: setting the zero-command `base_yaw_rate` penalty to the midpoint
+  -0.75 will be safe for PPO and, over a full run, may retain most of the yaw
+  improvement at -1.0 while recovering the better wrist tracking, action
+  smoothness, and foot sliding observed at -0.5.
+- Exact change under test: only `base_yaw_rate` changed from -1.0 to -0.75
+  relative to `g1_wrist_recovery_yawpen_v2_full3` (and from -0.5 to -0.75
+  relative to the current best balanced `g1_wrist_recovery_yawpen_v1_full2`).
+  Commands, curricula, disturbances, all other reward weights, and PPO settings
+  remained unchanged.
+- Status: successful 1-GPU validation with 256 environments and 10 iterations;
+  exit code 0. CUDA, Warp, MuJoCo, all environment managers, rollout
+  collection, and PPO initialized and completed normally. This validation does
+  not count toward the five-full-run budget.
+- Result: all 81,920 simulation steps completed, reaching 5,852 steps/s on the
+  final iteration. The run produced 10 samples for each of 50 TensorBoard
+  scalars, all finite, and checkpoints `model_0.pt` and `model_9.pt` under
+  `logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_19-12-35`. No traceback,
+  exception, code/configuration failure, infrastructure failure, NaN, or
+  non-finite scalar was found. At iteration 9, mean reward was -0.16735, mean
+  episode length 65.62 steps, value loss 0.47185, surrogate loss -0.02647,
+  mean wrist-position error 0.70748 m, peak wrist error 0.74759 m,
+  wrist-rotation error 0.78834 rad, inter-wrist error 0.16458 m, mean action
+  acceleration 0.40169, horizontal-velocity error 0.09218, yaw-rate error
+  0.09760, and foot stagger 0.14984 m. Base-height and bad-orientation
+  terminations were 0.125 and 3.90625 per logged episode batch.
+- Baseline comparison: startup behavior remained in the same range as the
+  preceding `g1_wrist_recovery_yawpen_v1_val` (-0.5) and
+  `g1_wrist_recovery_yawpen_v2_val` (-1.0) validations. At iteration 9,
+  yaw-rate error was 0.09760 versus 0.1000 and 0.1013, episode length 65.62
+  versus 66.36 and 66.12, wrist-position error 0.70748 versus 0.7144 and
+  0.7106, and action acceleration 0.40169 versus 0.4000 and 0.4010. These
+  small startup differences do not establish policy-quality improvement. The
+  changed total reward scale is not used for comparison, and ten iterations
+  validate safety rather than the midpoint tradeoff hypothesis.
+- Decision: the controlled midpoint reward passed validation. Remote status
+  showed no tmux sessions, no GPU processes, and all four GPUs idle. Launch
+  full run 4 of at most five as `g1_wrist_recovery_yawpen_v3_mid075_full4`
+  with 4,096 environments and 5,000 iterations on all four GPUs. Compare its
+  final-100 yaw-rate error, wrist errors, terminations, foot stagger/slide,
+  horizontal velocity, and action acceleration directly against both
+  `g1_wrist_recovery_yawpen_v1_full2` and
+  `g1_wrist_recovery_yawpen_v2_full3`; do not compare total reward across the
+  changed reward scales.
+
+### `g1_wrist_recovery_yawpen_v3_mid075_full4`
+
+- Hypothesis: setting the zero-command `base_yaw_rate` penalty to the midpoint
+  -0.75 would retain most of the yaw improvement at -1.0 while recovering the
+  better wrist tracking, action smoothness, and foot sliding observed at -0.5.
+- Exact change under test: only `base_yaw_rate` changed from -1.0 to -0.75
+  relative to `g1_wrist_recovery_yawpen_v2_full3` (and from -0.5 to -0.75
+  relative to the best balanced `g1_wrist_recovery_yawpen_v1_full2`). Commands,
+  curricula, disturbances, all other reward weights, and PPO settings were
+  unchanged. The preceding `g1_wrist_recovery_yawpen_v3_mid075_val`
+  validation passed.
+- Status: successful full 4-GPU run with 4,096 environments and 5,000
+  iterations; exit code 0 and DONE marker present. All workers completed
+  normally after 2,621,440,000 environment steps; the training loop elapsed
+  3:15:24. This is full run 4 of the five-run budget.
+- Result: training was finite and stable. The run produced 5,000 samples for
+  each of 50 TensorBoard scalars with no non-finite values, plus 51 checkpoints
+  through `model_4999.pt`, under
+  `logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_19-18-39`. Over the final
+  100 iterations, mean reward was 135.981, mean episode length was
+  599.842/600, value loss was 0.01705, surrogate loss was -0.00299, and policy
+  standard deviation was 0.22822. Mean wrist-position error was 0.00273 m,
+  peak wrist error 0.01786 m, wrist-rotation error 0.06086 rad, inter-wrist
+  error 0.00301 m, horizontal-velocity error 0.10971, yaw-rate error 0.34722,
+  foot stagger 0.17139 m, and mean action acceleration 0.50134. Action-rate
+  and foot-slide reward contributions were -0.20490 and -0.00262. Base-height
+  and bad-orientation terminations averaged 0.00375 and 0.00219 per logged
+  episode batch. The final log reports that all workers completed successfully.
+  Its SIGTERM traceback occurred only during torchrun cleanup after successful
+  completion and did not affect the exit code, event file, metrics, or final
+  checkpoint; it is not a code, training, or infrastructure failure.
+- Baseline comparison: versus the final-100 window of the best balanced -0.5
+  run, `g1_wrist_recovery_yawpen_v1_full2`, yaw-rate error improved 4.1%
+  (0.36214 to 0.34722), but mean wrist-position error regressed 25.9% (0.00217
+  to 0.00273 m), peak wrist error regressed 5.5%, wrist-rotation error regressed
+  6.2%, inter-wrist error regressed 15.2%, foot stagger regressed 17.3%, action
+  acceleration regressed 1.5%, and horizontal-velocity error regressed 1.4%.
+  Foot-slide cost was effectively unchanged. Versus the -1.0 yaw-specialized
+  `g1_wrist_recovery_yawpen_v2_full3`, yaw-rate error was 3.1% worse and foot
+  stagger was 19.2% worse; action acceleration and foot sliding improved, but
+  most wrist-position metrics remained worse. The same pattern is present in
+  the final-500 windows, so it is not an isolated end-of-run fluctuation. Total
+  reward is not used across the different reward scales.
+- Best checkpoint/result: retain
+  `g1_wrist_recovery_yawpen_v1_full2`'s
+  `logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_12-12-08/model_4999.pt`
+  as the best balanced checkpoint. It has the strongest combined wrist
+  tracking, smoothness, foot behavior, survival, and materially improved yaw
+  error. Retain `g1_wrist_recovery_yawpen_v2_full3/model_4999.pt` only as the
+  yaw-specialized alternative. The local `base_yaw_rate` configuration was
+  reverted from the unsuccessful midpoint -0.75 to the best balanced -0.5.
+- Decision: stop without launching another experiment. Four full runs have
+  completed. The midpoint hypothesis failed, the response of wrist and foot
+  metrics to yaw-penalty strength is non-monotonic, and no numeric acceptance
+  threshold or supported single-factor next change identifies how to spend the
+  final full-run slot without making a material design tradeoff. A fifth run
+  merely to keep the loop active would not be justified. Resume only after a
+  user decision prioritizes additional yaw suppression versus wrist/foot
+  quality, or supplies an acceptance target that supports a controlled next
+  experiment.

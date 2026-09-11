@@ -3,6 +3,8 @@
 outputs
 logs
 wandb
+.autotune/
+__pycache__/
 MUJOCO_LOG.TXT
 deploy/robots/go2/build
 deploy/robots/g1/build

@@ -24,16 +24,24 @@ if ssh "$REMOTE_HOST" "tmux has-session -t '$SESSION' 2>/dev/null"; then
     exit 1
 fi
 
+if ssh "$REMOTE_HOST" "test -e '$RUN_DIR'"; then
+    echo "ERROR: run directory already exists; choose a unique session name:"
+    echo "  $RUN_DIR"
+    exit 1
+fi
+
 printf -v TRAIN_ARGS '%q ' "$@"
+printf -v TRAIN_ARGS_VALUE '%q' "$TRAIN_ARGS"
 
 REMOTE_CMD="
 set -o pipefail
 mkdir -p '$RUN_DIR'
-rm -f '$RUN_DIR/DONE' '$RUN_DIR/exit_code'
+date -Is > '$RUN_DIR/started_at'
+printf '%s\\n' $TRAIN_ARGS_VALUE > '$RUN_DIR/train_args'
 
 cd '$REMOTE_REPO'
 
-./run_train.sh $TRAIN_ARGS 2>&1 | tee '$RUN_DIR/train.log'
+bash ./run_train.sh $TRAIN_ARGS 2>&1 | tee '$RUN_DIR/train.log'
 
 rc=\${PIPESTATUS[0]}
 
@@ -49,7 +57,9 @@ ssh "$REMOTE_HOST" \
     "tmux new-session -d -s '$SESSION' bash -lc $TMUX_CMD"
 
 mkdir -p .autotune
-echo "$SESSION" > .autotune/current_trial
+CURRENT_TRIAL_TMP=".autotune/current_trial.$$"
+printf '%s\n' "$SESSION" > "$CURRENT_TRIAL_TMP"
+mv "$CURRENT_TRIAL_TMP" .autotune/current_trial
 
 sleep 1
 
