@@ -31,6 +31,15 @@ and acceptance thresholds must not be tuned against individual checkpoints.
 | 5. Locomotion | Introduce base twist gradually: standing-dominant mixture, then slow forward/lateral/yaw walking while wrist targets remain world/task consistent. | Moving-window wrist error, velocity tracking, falls, slip, and action smoothness all meet separately defined gates. Do not infer readiness from total reward. |
 | 6. EgoDex/Pico trajectories | Train on mapped continuous bimanual trajectories, with held-out objects/trajectory clips and latency/noise randomization. | Generalizes to unseen clips and asymmetric manipulation; simulator-to-real safety review precedes hardware execution. |
 
+For automated promotion, “bounded” robust degradation means: static, payload,
+and push success each remain at least 85% with fall rate at most 10%; both reach
+scenarios remain at least 70% successful with fall rate at most 15%; and Stage
+4 combined remains at least 65% successful with fall rate at most 15%. The
+stricter nominal gates in the table still apply. During independent-seed
+confirmation, apply gates to the aggregate across seeds and reject any seed
+whose fall rate exceeds the corresponding limit by more than 5 percentage
+points. These thresholds were fixed before reading the new robust matrix.
+
 ## Mixture discipline
 
 - Within each new stage, start roughly 50% from the previous mastered stage,
