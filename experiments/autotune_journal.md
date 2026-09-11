@@ -701,3 +701,85 @@
   iterations, and the confirmed Stage 3 reach/asymmetry mixture. This screen
   tests stationary height/ground-reaching control; planar movement remains zero
   and will be introduced as the next separate factor after provisional review.
+
+### Stage 5A shoulder-height and low-reach screen result (`g1_stage5_height_screen_v1`)
+
+- Hypothesis and exact change: this fixed-seed four-way screen crossed
+  height-task frequency (0.25/0.50) with moderate
+  shoulder/wrist ranges (0.82--1.02 m / 0.35--0.55 m) versus deep ranges
+  (0.68--0.98 m / 0.12--0.35 m). It retained the confirmed Stage 3
+  reach/asymmetry mixture, zero planar twist, rewards, and PPO settings. Each
+  sibling used seed 1501, one H20, 4,096 environments (both per-rank and
+  global), and 5,000 PPO iterations (655,360,000 environment steps).
+- Status: all four siblings exited 0 and completed normally at iteration 4999
+  in 3:16--3:20. Each preserved `train.log`, a TensorBoard event file, and
+  checkpoints through `model_4999.pt`. Final logs and final-100 TensorBoard
+  windows were finite; no traceback, CUDA/Warp or infrastructure error, NaN,
+  or divergence occurred. Remote status after completion showed no tmux
+  session, GPU process, or active full DDP job.
+- Provisional final-100 diagnostics: the two 25% cases were substantially
+  better than 50% exposure. `freq025_deep` had height error 0.2847 m,
+  mean/peak wrist error 0.1906/0.2110 m, action acceleration 0.7332,
+  yaw error 0.6180, action-rate cost -0.4070, and foot-slide cost -0.00589;
+  `freq025_moderate` had 0.2879 m, 0.1938/0.2135 m, 0.7743, 0.6472,
+  -0.4493, and -0.00663. At 50%, moderate/deep height error rose to
+  0.5437/0.5421 m, wrist error to 0.3840/0.3851 m, and action acceleration
+  to 0.8422/0.8199. Episodes remained 596.6--598.4 of 600 and backward-lean
+  terminations remained at or below 0.22% of logged episode batches. Deep
+  25% had somewhat higher foot stagger (0.1666 m versus 0.1533 m), so this
+  ranks a training candidate rather than establishing a final policy claim.
+- Baseline comparison and decision: this plan deliberately omits automatic
+  held-out evaluation, and Stage 5 has no fixed quantitative acceptance gate;
+  the results are engineering diagnostics only, with all checkpoints retained
+  for the user's final visual/held-out judgment. The resolved configurations
+  confirm that the deep ranges were applied. Provisionally retain
+  `freq025_deep/model_4999.pt` as the stationary-height candidate because it
+  improves the relevant tracking and smoothness diagnostics at the same 25%
+  exposure. The next defined single factor is gradual planar twist. Launch
+  registered fixed-seed screen `g1_stage5_twist_screen_v1`, retaining exactly
+  the 25%-deep mixture while crossing non-standing command fraction (25%/50%)
+  and one low/medium planar-twist amplitude. No evaluation block is included;
+  do not interpret the screen as a final policy selection.
+
+### Stage 5B gradual planar-twist screen result (`g1_stage5_twist_screen_v1`)
+
+- Hypothesis and exact change: starting from the provisional Stage 5A `freq025_deep`
+  mixture, this fixed-seed screen introduced only planar twist.  It crossed non-standing
+  command exposure of 25%/50% (`rel-standing-envs=0.75/0.50`) with low
+  x/y/yaw ranges of +/-0.10/+/-0.05/+/-0.10 and medium ranges of
+  +/-0.20/+/-0.10/+/-0.20.  The 25%-deep height mixture, 0.50 reach probability,
+  0.50 asymmetric probability, rewards, curriculum, PPO settings, and seed 1601
+  were otherwise unchanged.  Each sibling used one H20, 4,096 environments
+  (both per-rank and global), and 5,000 iterations (655,360,000 environment steps).
+- Status: every sibling recorded exit code 0 and DONE: `active25_low` at
+  20:54:46 UTC, `active50_low` at 20:51:33, `active25_medium` at 20:51:29,
+  and `active50_medium` at 20:50:22.  All completed iteration 4999 normally,
+  with preserved TensorBoard event files and 11 MiB `model_4999.pt` checkpoints
+  in respectively `2026-09-11_17-27-24`, `17-27-30`, `17-27-37`, and
+  `17-27-43`.  Log tails and final-100 TensorBoard windows contain no traceback,
+  CUDA/Warp or infrastructure error, NaN, divergence, or non-finite scalar.
+  Remote status after completion had no tmux session, GPU process, or active full
+  DDP job.
+- Provisional final-100 diagnostics (training evidence only):
+  `active25_low` / `active50_low` / `active25_medium` / `active50_medium` had
+  wrist mean error 0.1885/0.1922/0.1965/0.1840 m, shoulder-height error
+  0.2809/0.2858/0.2862/0.2718 m, action acceleration
+  0.7468/0.7615/0.7399/0.7294, and x-y velocity error
+  0.1527/0.1626/0.1635/0.1856.  Yaw error was 0.6304/0.6446/0.6223/0.6225;
+  foot stagger was 0.1490/0.1528/0.1712/0.1524 m; and action-rate cost was
+  -0.4236/-0.4345/-0.4140/-0.4024.  Mean episodes remained 598.3/598.3/598.3/598.8
+  of 600.  Backward-lean termination was zero except `active25_medium` (0.0097)
+  and `active50_medium` (0.00094) per logged episode batch; the corresponding
+  base-height plus bad-orientation counts were 0.0309/0.0350/0.0372/0.0253.
+- Baseline comparison and decision: compared with the stationary `freq025_deep`
+  candidate (height/wrist/action-acceleration 0.2847/0.1906/0.7332), low-amplitude
+  25%-active twist retains essentially the same height and wrist tracking while
+  adding the best x-y tracking and avoiding any backward-lean termination.  It is
+  therefore the conservative provisional Stage 5B candidate:
+  `/home/dev/unitree_rl_mjlab/logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-11_17-27-24/model_4999.pt`.
+  This is not a final policy claim: the plan intentionally has no automatic
+  held-out evaluation or numerical Stage 5 promotion gate, and all sibling
+  checkpoints are retained for the user's visual/fixed-suite review.  Stop
+  autonomous training here.  No further defined Stage 5 controlled factor or
+  acceptance criterion exists, and Stage 6 requires the absent mapped-trajectory
+  split and interface contract; launching another run would not be justified.

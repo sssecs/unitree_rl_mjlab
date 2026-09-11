@@ -1,0 +1,62 @@
+{
+  "group": "g1_stage5_twist_screen_v1",
+  "mode": "parameter-screening",
+  "hypothesis": "The provisionally preferred stationary-height mixture (25% deep height tasks) can retain height and low-wrist control under gradually introduced planar twist; command exposure and amplitude determine the safe initial operating range.",
+  "task": "Unitree-G1-Wrist-Recovery-Teacher",
+  "common_args": [
+    "--env.scene.num-envs=4096",
+    "--agent.max-iterations=5000",
+    "--agent.logger=tensorboard",
+    "--env.commands.wrists.reach-probability=0.50",
+    "--env.commands.wrists.asymmetric-probability=0.50",
+    "--env.commands.wrists.height-probability=0.25",
+    "--env.commands.wrists.shoulder-height-range", "(0.68,0.98)",
+    "--env.commands.wrists.low-wrist-height-range", "(0.12,0.35)"
+  ],
+  "runs": [
+    {
+      "name": "active25_low",
+      "gpu": 0,
+      "seed": 1601,
+      "args": [
+        "--env.commands.twist.rel-standing-envs=0.75",
+        "--env.commands.twist.ranges.lin-vel-x", "(-0.10,0.10)",
+        "--env.commands.twist.ranges.lin-vel-y", "(-0.05,0.05)",
+        "--env.commands.twist.ranges.ang-vel-z", "(-0.10,0.10)"
+      ]
+    },
+    {
+      "name": "active50_low",
+      "gpu": 1,
+      "seed": 1601,
+      "args": [
+        "--env.commands.twist.rel-standing-envs=0.50",
+        "--env.commands.twist.ranges.lin-vel-x", "(-0.10,0.10)",
+        "--env.commands.twist.ranges.lin-vel-y", "(-0.05,0.05)",
+        "--env.commands.twist.ranges.ang-vel-z", "(-0.10,0.10)"
+      ]
+    },
+    {
+      "name": "active25_medium",
+      "gpu": 2,
+      "seed": 1601,
+      "args": [
+        "--env.commands.twist.rel-standing-envs=0.75",
+        "--env.commands.twist.ranges.lin-vel-x", "(-0.20,0.20)",
+        "--env.commands.twist.ranges.lin-vel-y", "(-0.10,0.10)",
+        "--env.commands.twist.ranges.ang-vel-z", "(-0.20,0.20)"
+      ]
+    },
+    {
+      "name": "active50_medium",
+      "gpu": 3,
+      "seed": 1601,
+      "args": [
+        "--env.commands.twist.rel-standing-envs=0.50",
+        "--env.commands.twist.ranges.lin-vel-x", "(-0.20,0.20)",
+        "--env.commands.twist.ranges.lin-vel-y", "(-0.10,0.10)",
+        "--env.commands.twist.ranges.ang-vel-z", "(-0.20,0.20)"
+      ]
+    }
+  ]
+}
