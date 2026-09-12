@@ -831,3 +831,74 @@
   therefore retains the normal 30k-step warmup and 60k-step severity/probability
   ramp so standing is learned before height commands become frequent. The smoke
   authorizes the formal run only at the software/numerical level.
+
+### Stage 5A feasible-target repair screen result (`g1_stage5a_feasible_screen_v2`)
+
+- Hypothesis and exact change: this fixed-seed, four-way screen tested the
+  repaired coupled height targets and height-active Huber losses at height-task
+  exposure 0.35/0.50 and shoulder-height ranges 0.78--0.98 m (moderate) versus
+  0.62--0.90 m (deep).  All siblings retained zero planar twist, reach and
+  asymmetric-target probabilities of 0.50, wrist residual-height range
+  +/-0.02 m, low-reach extension 0.06--0.14 m, the normal warmup/ramp, rewards,
+  PPO settings, and seed 1701.  Each used one H20 with 4,096 environments
+  (per-rank and global) for 5,000 PPO iterations (655,360,000 environment
+  steps).  The plan intentionally has no automatic held-out evaluation.
+- Status: all four siblings exited 0, wrote DONE markers, TensorBoard event
+  files, and final `model_4999.pt` checkpoints.  Their final logs complete at
+  iteration 4999 after 3:19--3:23.  TensorBoard contains 5,000 finite samples
+  for every inspected scalar; log tails contain no traceback, CUDA/Warp or
+  infrastructure failure, NaN, or divergence.  Remote status after completion
+  had no tmux sessions and no GPU processes.
+- Final-100 provisional diagnostics, ordered as 35%-moderate / 50%-moderate /
+  35%-deep / 50%-deep: height-active wrist error was
+  8.73/14.77/9.38/13.24 cm; height-active shoulder error was
+  7.61/11.49/6.54/7.71 cm; non-height wrist error remained
+  0.33/0.25/0.35/0.26 cm; and mean episode length was
+  432.0/361.5/432.8/357.3 of 600.  Backward-lean termination was zero in every
+  final window and mean backward lean was at most 0.00129 rad, so the repaired
+  target and one-sided safety constraint behaved as intended.  However,
+  bad-orientation terminations were 0.084/5.471/3.235/5.548 per logged episode
+  batch, respectively.  Increasing exposure from 35% to 50% therefore worsened
+  height wrist tracking and episode survival materially in both depth ranges.
+- Baseline comparison: unlike the rejected v1 screen, the coupled targets keep
+  the shoulder--wrist command feasible and preserve millimetre-scale
+  non-height tracking rather than sacrificing the old task.  This is a useful
+  engineering repair, but not a Stage 5A promotion: the predeclared stationary
+  gate requires height-active wrist error below 4 cm, height-active shoulder
+  error below 5 cm, nearly full episode length, no systematic backward lean,
+  and acceptable non-height retention.  No sibling meets the first three
+  requirements.  `active035_moderate/model_4999.pt`
+  (`2026-09-11_23-28-57`) is the closest provisional wrist/retention candidate,
+  while `active035_deep/model_4999.pt` has the lower shoulder error; neither is
+  retained as a promoted policy and all four checkpoints are preserved.
+- Decision: stop autonomous training.  Stage 5B twist remains blocked by the
+  explicit stationary-height gate, and no next stationary curriculum factor,
+  stage budget, or acceptance criterion is defined that would justify another
+  registered group without changing the agreed task design.  Do not relax the
+  4/5-cm or episode-length criteria to manufacture a pass.  Resume only after
+  the user supplies a controlled next Stage 5A intervention or accepts a
+  revised, predeclared curriculum/gate.
+
+### Stage 5A v3 engineering correction (supersedes v2 interpretation)
+
+- Read-only CPU reproduction confirmed shoulder and wrist residual samples
+  remained exactly zero because advanced-index `.uniform_()` changed a copy.
+  Symmetric reach extension had the same bug (zero or stale). V2 therefore
+  commanded final shoulder height zero at full curriculum; moderate/deep ranges
+  were not actually applied. The v2 screen cannot rank depth configurations.
+- V2 raw masked errors were also mistaken for conditional errors. Corrected
+  final-100 wrist errors for 35%-moderate / 50%-moderate / 35%-deep / 50%-deep
+  are 24.92/29.59/26.76/26.43 cm; shoulder errors are
+  21.72/23.02/18.66/15.38 cm; non-height wrist errors are about 0.5 cm.
+  Backward-lean metrics are projections/sines, not radians. Existing checkpoints
+  and historical records are preserved, but v2 promotion claims are withdrawn.
+- V3 hypothesis: correct explicit sampling writeback and masked-metric
+  normalization, with no reward/PPO change. Add CPU regression checks of deployed
+  sampling and target initialization, plus final-target diagnostics. Re-run the
+  same four-way exposure/depth screen and seed1701 under a unique v3 group.
+- Authorized new Stage 5A budget: three registered groups including v3 and
+  confirmation. Consumed: 0/3 before launch. V1/v2 bugged runs do not count.
+  Follow-ups may change only depth curriculum, ramp duration, or the common
+  Huber-weight scale, based on failure evidence. An unmet gate or missing next
+  JSON alone must not stop justified in-budget 5A improvement. No automatic
+  complete evaluator; preserve all models and email the existing round summary.

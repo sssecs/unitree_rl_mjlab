@@ -36,6 +36,12 @@ Your job is to:
 2. Check its exit code first.
 3. Read the remote training log.
 4. Inspect TensorBoard metrics and checkpoints when available.
+   For wrist/height groups use the remote installed Python to run
+   `tools/summarize_wrist_training.py <sessions...>` (read-only). Its
+   `conditional` results normalize masked numerators by actual command
+   fractions. Never compare raw `_masked` values against conditional gates.
+   Check actual final shoulder/wrist targets against configured ranges;
+   resolved configuration and finite PPO alone are not command validation.
 5. Determine whether the experiment:
    - completed successfully,
    - crashed due to code/configuration,
@@ -62,6 +68,10 @@ If the experiment crashed:
 
 If the experiment trained successfully:
 - formulate one specific hypothesis for improvement;
+- if a valid Stage 5A group misses its gate but its recorded three-group budget
+  remains, use the training plan's allowed controlled interventions to continue
+  within 5A when supported by evidence. A missing prewritten next JSON is not
+  a reason to stop. Never advance to 5B or relax gates to manufacture a pass.
 - prefer changing one conceptual factor at a time;
 - consider velocity tracking, gait quality, falls, smoothness, action acceleration, foot slip, and robustness rather than total reward alone.
 - do not claim a 1--3% improvement from one training seed unless the fixed

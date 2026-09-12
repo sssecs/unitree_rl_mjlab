@@ -114,11 +114,13 @@ class BimanualWristCommand(CommandTerm):
       "foot_stagger",
       "asymmetric_fraction",
       "height_command_fraction",
-      "height_wrist_pos_error",
-      "nonheight_wrist_pos_error",
+      "height_wrist_pos_error_masked",
+      "nonheight_wrist_pos_error_masked",
       "shoulder_height_error",
-      "height_shoulder_error",
-      "height_target_vertical_gap",
+      "height_shoulder_error_masked",
+      "height_target_vertical_gap_masked",
+      "height_final_shoulder_target_masked",
+      "height_final_wrist_target_masked",
       "shoulder_height_difference",
       "torso_backward_lean",
       "torso_forward_bend",
@@ -229,7 +231,10 @@ class BimanualWristCommand(CommandTerm):
       torch.rand(len(env_ids), device=self.device) < reach_probability
     )
     self.scenario[env_ids] = reach_active.float()
-    self.extension[env_ids].uniform_(*self.cfg.extension_range)
+    # Advanced indexing returns a copy: sample first, then assign back.
+    self.extension[env_ids] = torch.empty(
+      len(env_ids), device=self.device
+    ).uniform_(*self.cfg.extension_range)
     self.extension[env_ids] *= self.scenario[env_ids] * curriculum
     offsets = torch.zeros(len(env_ids), 2, 3, device=self.device)
     offsets[..., 0] = self.extension[env_ids, None]
@@ -241,12 +246,12 @@ class BimanualWristCommand(CommandTerm):
     )
     self.height_active[env_ids] = height_active
     self.height_difficulty[env_ids] = curriculum
-    self.sampled_shoulder_height[env_ids].uniform_(
-      *self.cfg.shoulder_height_range
-    )
-    self.sampled_wrist_height_offset[env_ids].uniform_(
-      *self.cfg.wrist_height_offset_range
-    )
+    self.sampled_shoulder_height[env_ids] = torch.empty(
+      len(env_ids), device=self.device
+    ).uniform_(*self.cfg.shoulder_height_range)
+    self.sampled_wrist_height_offset[env_ids] = torch.empty(
+      len(env_ids), device=self.device
+    ).uniform_(*self.cfg.wrist_height_offset_range)
     num_height = int(height_active.sum().item())
     if num_height > 0:
       height_extension = torch.empty(num_height, device=self.device)
@@ -457,20 +462,30 @@ class BimanualWristCommand(CommandTerm):
     height_mask = self.height_active.float()
     nonheight_mask = (~self.height_active).float()
     mean_pos_error = pos_error.mean(-1)
-    self.metrics["height_wrist_pos_error"] = mean_pos_error * height_mask
-    self.metrics["nonheight_wrist_pos_error"] = mean_pos_error * nonheight_mask
+    # These are numerators, not conditional means. Divide their logged mean
+    # by the matching logged command fraction (see summarize_wrist_training.py).
+    self.metrics["height_wrist_pos_error_masked"] = mean_pos_error * height_mask
+    self.metrics["nonheight_wrist_pos_error_masked"] = (
+      mean_pos_error * nonheight_mask
+    )
     self.metrics["shoulder_height_error"] = torch.abs(
       self.target_shoulder_height - self.shoulder_height
     )
-    self.metrics["height_shoulder_error"] = (
+    self.metrics["height_shoulder_error_masked"] = (
       self.metrics["shoulder_height_error"] * height_mask
     )
-    self.metrics["height_target_vertical_gap"] = (
+    self.metrics["height_target_vertical_gap_masked"] = (
       torch.abs(
         self.target_shoulder_height
         - self.desired_wrist_pos_w[..., 2].mean(-1)
       )
       * height_mask
+    )
+    self.metrics["height_final_shoulder_target_masked"] = (
+      self.final_shoulder_height * height_mask
+    )
+    self.metrics["height_final_wrist_target_masked"] = (
+      self.final_pos_w[..., 2].mean(-1) * height_mask
     )
     self.metrics["shoulder_height_difference"] = self.shoulder_height_difference
     self.metrics["torso_backward_lean"] = torch.clamp_min(

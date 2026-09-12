@@ -138,6 +138,57 @@ has height-active wrist error below 4 cm, height-active shoulder error below
 non-height wrist retention. The repair screen is defined in
 `experiments/stage5a_feasible_screen_v2.json`.
 
+## Stage 5A v3 correction and bounded continuation
+
+The v1/v2 conclusions above are superseded by a confirmed sampling bug:
+`tensor[env_ids].uniform_()` updates an advanced-index copy, not the original
+tensor. Shoulder samples and residual offsets stayed zero; symmetric reach
+extension was also zero or stale. Resolved YAML alone did not prove that the
+commands were applied. The v2 moderate/deep distribution comparison is invalid,
+and preserving a shoulder--wrist vertical gap alone does not prove whole-body
+or orientation feasibility. Previous fixed scripted held-out results remain
+separate evidence, but training-distribution claims require this correction.
+
+V3 assigns sampled values back explicitly and keeps all rewards unchanged.
+Run `tools/check_wrist_command_sampling.py` with the training Python before
+launching smoke/full training. It must check actual samples, noncontiguous reset
+subsets, both height ranges, curriculum interpolation, initialized wrist/shoulder
+targets, and fresh symmetric reaches. This CPU test is not a dynamics evaluator.
+Smoke must also show plausible actual final shoulder/wrist targets, not merely
+finite values. The reviewed first group is
+`experiments/stage5a_sampling_screen_v3.json`.
+
+Command metrics ending in `_masked` are population-average numerators, NOT
+height-active conditional means. Use `tools/summarize_wrist_training.py` on the
+remote machine to extract TensorBoard and divide numerator means by the actual
+height command fraction (or its complement for non-height metrics). Historical
+v2 names without `_masked` need the same normalization. Report unavailable
+conditional means when the fraction is zero. These command-reset snapshots are
+training diagnostics, not time-averaged held-out errors. Report backward lean
+as a dimensionless sine/projection, not radians, and termination counts as
+counts per logged batch, not fall percentages.
+
+Authorized Stage 5A budget: at most THREE new registered groups, including v3
+and any independent-seed confirmation; at most four one-GPU runs per group,
+4,096 environments per run, and 5,000 PPO iterations per run. Validation is
+excluded. Bugged v1/v2 groups do not consume this budget. Record consumed groups
+in the journal. An unmet 5A gate is not by itself a stopping reason while this
+budget remains and evidence supports a controlled intervention. Remain in 5A;
+do not weaken its 4-cm wrist/5-cm shoulder requirements. Operationalize nearly
+full episodes as final-100 mean length >=590/600, with non-height conditional
+wrist error <2 cm and no systematic backward-lean failure. Final judgment is
+still manual; no complete automatic held-out matrix is requested.
+
+For a justified follow-up, vary only ONE conceptual factor: shoulder-depth
+curriculum (shallower targets), curriculum ramp duration, or a common scaling
+of the two height-active Huber loss weights. Pick the factor from actual failure
+categories, preserve other settings, and validate risky changes. If v3 passes,
+prefer independent-seed confirmation (at least three seeds) rather than
+selecting a lucky seed. Stop on exhausted budget, repeated diagnosed crashes,
+two genuine valid groups without targeted improvement, or absent evidence for
+a safe next step; do not stop merely because a new JSON plan is not prewritten.
+Stage 5B remains paused until stationary lowering is established.
+
 Example:
 
 ```bash
