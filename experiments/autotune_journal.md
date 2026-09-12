@@ -1059,3 +1059,47 @@
   training: Stage 5B defines no further controlled factor or quantitative
   promotion criterion, and Stage 6 requires the absent mapped-trajectory
   split/interface contract. Launching another run would not be evidence-based.
+
+### Stage 5B explicit clutch repair v3 (user-authorized)
+
+- Diagnosis: 5B v2 retained world-fixed wrists while requesting sustained
+  locomotion, and applied quiet-body penalties unconditionally. Tiny wrist
+  errors do not establish mobile wrist control. Treat its candidate only as
+  a preserved diagnostic baseline, not as successful Stage 5B promotion.
+- User authorized three episode types: transport (clutch=1), bounded anchored
+  adjustment (clutch=0, small twist), and autonomous balance (clutch=0, zero
+  twist). The terminal mixture is 25%/25%/50%. Transport world wrist poses are
+  updated by commanded-reference translation/yaw, not actual robot motion;
+  anchored wrists remain fixed in world. Shoulder height remains world-z.
+  Adjustment starts at 3 s, lasts at most 2 s, and has commanded cumulative
+  path/yaw budgets 0.08 m/0.12 rad. These do not restrict actual recovery steps.
+- Code commit `34ba05c` adds the binary clutch observation (534 rather than
+  531 history observations), motion-request gating for quiet-body/feet rewards,
+  and accumulated moving-only wrist/height/velocity diagnostics. Old command
+  defaults retain their original dimensions; new policies start from scratch.
+  Existing `Metrics/twist/error_vel_*` normalization depends on the long
+  resampling interval and must NOT be compared with earlier runs. Use the new
+  normalized moving-only metrics and commanded magnitudes instead.
+- Both CPU checks passed on the immutable remote training Python, including
+  noncontiguous reset subsets, explicit sample assignment, independent
+  transport translation/yaw, anchored world-pose retention, bounded command
+  stopping, and moving statistics surviving terminal post-adjustment stops.
+- `g1_stage5b_clutch_smoke_v3` used one GPU, 256 environments, 100 iterations,
+  immediate full command difficulty: exit 0, finite PPO/TB, all modes sampled.
+  Random-initialization falls were frequent; this is runtime validation only,
+  not task mastery. Final-version gradual-course validation is
+  `g1_stage5b_clutch_smoke_v3_ramp` (one GPU, 256 environments, 200 iterations,
+  no warmup/6k ramp): exit 0, all 200 inspected TB samples finite. Final-20
+  balance/transport/adjust fractions were 0.5232/0.2504/0.2264; episode length
+  was only 90.65/600 and adjustment moving coverage only 0.0000789 of samples.
+  This confirms runtime/telemetry, NOT mastery or reliable adjustment statistics.
+  Normal full-run warmup remains essential. These smoke runs do not consume
+  the registered budget.
+- Reviewed next group: `experiments/stage5b_clutch_screen_v3.json`; four
+  independent one-H20 runs, 4,096 environments globally per run and 16,384
+  concurrently, seed 1802, 5,000 iterations, normal 30k warmup/60k ramp.
+  Hold the entire three-mode/height distribution fixed and vary only a common
+  velocity-tracking reward multiplier 1/2/4/8. Gradual validation completed;
+  authorize the reviewed full launch, consuming group 1/3; at most one
+  justified single-factor follow-up and one independent-seed confirmation.
+  No automatic full evaluator. Email only the existing analysis summaries.
