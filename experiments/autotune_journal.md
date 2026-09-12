@@ -902,3 +902,29 @@
   Huber-weight scale, based on failure evidence. An unmet gate or missing next
   JSON alone must not stop justified in-budget 5A improvement. No automatic
   complete evaluator; preserve all models and email the existing round summary.
+
+### Stage 5A v3 validation and first budgeted group
+
+- CPU regression passed on the immutable remote environment. Actual moderate
+  shoulder samples span 0.7801--0.9798 m and initialized wrist heights span
+  0.4155--0.6492 m; deep samples span 0.6212--0.8996 m with wrists
+  0.2571--0.5651 m. Subset isolation, fresh symmetric reach, curriculum
+  interpolation, and masked-metric normalization passed. Full-pose dynamics
+  feasibility is still a training question, not established by this test.
+- `g1_stage5a_sampling_smoke_v3` used one H20, 256 environments (per-rank/global),
+  20 PPO iterations, and 100% moderate height tasks without the normal warmup.
+  It exited 0. Real simulation logged final shoulder target 0.8452 m and wrist
+  target 0.4961 m, NOT zero, and finite PPO/reward/command diagnostics. Short
+  random-policy episodes still fell; this is software validation only. The full
+  group restores the normal warmup/ramp and the original v2 reward weights.
+- New summary tool reproduced v2 35%-moderate conditional wrist error
+  0.249186 m and shoulder error 0.217205 m from its TensorBoard, confirming
+  normalization and historical-name compatibility.
+- Authorized next launch: `g1_stage5a_sampling_screen_v3`, first of THREE
+  budgeted groups (1/3 on launch). Four independent H20 runs, same seed1701,
+  4,096 environments per rank/run; 16,384 concurrent across the group, not DDP.
+  Each run is 5,000 PPO iterations. No automatic complete held-out evaluator.
+  Watcher must analyze the four siblings once, email the existing summary, and
+  use the remaining two groups for justified controlled 5A improvement or seed
+  confirmation, rather than stopping merely because this first group misses
+  the gate. Stage 5B remains paused.

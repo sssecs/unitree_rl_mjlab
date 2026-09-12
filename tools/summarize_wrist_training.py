@@ -49,13 +49,13 @@ def main() -> None:
     counts = {}
     nonfinite = []
     for tag in events.Tags()["scalars"]:
+      values = events.Scalars(tag)
+      if any(not math.isfinite(value.value) for value in values):
+        nonfinite.append(tag)
       if tag.startswith(("Metrics/wrists/", "Metrics/twist/", "Episode_Termination/")) or tag in (
         "Train/mean_episode_length", "Train/mean_reward", "Episode_Metrics/mean_action_acc"
       ):
-        values = events.Scalars(tag)
         counts[tag] = len(values)
-        if any(not math.isfinite(value.value) for value in values):
-          nonfinite.append(tag)
         if values:
           means[tag] = statistics.fmean(value.value for value in values[-args.window:])
     print(json.dumps({
