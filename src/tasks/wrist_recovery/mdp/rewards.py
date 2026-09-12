@@ -145,14 +145,22 @@ def base_horizontal_velocity_l2(
   env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg
 ) -> torch.Tensor:
   asset: Entity = env.scene[asset_cfg.name]
-  return torch.sum(torch.square(asset.data.root_link_lin_vel_b[:, :2]), dim=-1)
+  error = torch.sum(torch.square(asset.data.root_link_lin_vel_b[:, :2]), dim=-1)
+  twist = env.command_manager.get_term("twist")
+  if getattr(twist.cfg, "clutch_enabled", False):
+    error *= (torch.linalg.vector_norm(twist.command, dim=-1) < 1e-5)
+  return error
 
 
 def base_yaw_rate_l2(
   env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg
 ) -> torch.Tensor:
   asset: Entity = env.scene[asset_cfg.name]
-  return torch.square(asset.data.root_link_ang_vel_b[:, 2])
+  error = torch.square(asset.data.root_link_ang_vel_b[:, 2])
+  twist = env.command_manager.get_term("twist")
+  if getattr(twist.cfg, "clutch_enabled", False):
+    error *= (torch.linalg.vector_norm(twist.command, dim=-1) < 1e-5)
+  return error
 
 
 def vertical_velocity_l2(
@@ -258,6 +266,8 @@ def quiet_feet_when_task_stable(
       < base_ang_speed_threshold
     )
   )
+  if command.cfg.clutch_enabled:
+    stable &= base_command < 1e-5
   return foot_speed_sq * stable.float()
 
 

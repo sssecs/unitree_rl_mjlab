@@ -73,6 +73,10 @@ If the experiment trained successfully:
   within 5A when supported by evidence. A missing prewritten next JSON is not
   a reason to stop. Never advance to 5B or relax gates to manufacture a pass.
 - prefer changing one conceptual factor at a time;
+- Stage 5A v3 has independently passed. For authorized Stage 5B clutch v3,
+  follow its three-group budget and three-mode gates in the training plan;
+  do not stop merely for lack of a prewritten follow-up JSON. Normalize moving
+  statistics by moving fractions and preserve world-anchored adjustment/balance.
 - consider velocity tracking, gait quality, falls, smoothness, action acceleration, foot slip, and robustness rather than total reward alone.
 - do not claim a 1--3% improvement from one training seed unless the fixed
   held-out comparison is consistent; require independent training seeds when

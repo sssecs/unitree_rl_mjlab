@@ -34,6 +34,7 @@ def from_angle_axis(angle, axis):
 def fixture(shoulder_range=(0.78, 0.98), step=90000):
   n = 1024
   cfg = NS(
+    clutch_enabled=False,
     curriculum_warmup_steps=30000, curriculum_ramp_steps=60000,
     reach_probability=0.0, asymmetric_probability=0.0, height_probability=1.0,
     extension_range=(0.12, 0.28), shoulder_height_range=shoulder_range,

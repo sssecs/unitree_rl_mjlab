@@ -103,6 +103,8 @@ class BimanualWristCommand(CommandTerm):
     self.final_pos_w = torch.zeros(shape, device=self.device)
     self.start_quat_w = self.target_quat_w.clone()
     self.final_quat_w = self.target_quat_w.clone()
+    self.transport_reference_pos = torch.zeros(self.num_envs, 3, device=self.device)
+    self.transport_reference_yaw = torch.zeros(self.num_envs, device=self.device)
     self.scripted_delay_s = cfg.reach_delay_s
     self.scripted_duration_s = cfg.reach_duration_s
 
@@ -129,6 +131,16 @@ class BimanualWristCommand(CommandTerm):
       "target_wrist_height",
     ):
       self.metrics[key] = torch.zeros(self.num_envs, device=self.device)
+    if cfg.clutch_enabled:
+      self.moving_statistics = torch.zeros(self.num_envs, 8, device=self.device)
+      for mode in ("balance", "transport", "adjust"):
+        for suffix in ("fraction", "wrist_error_masked", "shoulder_error_masked",
+                       "velocity_xy_error_masked", "velocity_yaw_error_masked",
+                       "moving_fraction", "moving_velocity_xy_error_masked",
+                       "moving_velocity_yaw_error_masked", "moving_wrist_error_masked",
+                       "moving_shoulder_error_masked", "moving_command_xy_masked",
+                       "moving_command_yaw_masked"):
+          self.metrics[f"{mode}_{suffix}"] = torch.zeros(self.num_envs, device=self.device)
 
   @property
   def robot_wrist_pos_w(self) -> torch.Tensor:
@@ -217,11 +229,17 @@ class BimanualWristCommand(CommandTerm):
       ),
       dim=-1,
     )
-    return torch.cat((pos_b.flatten(1), rot6d_b, task), dim=-1)
+    command = torch.cat((pos_b.flatten(1), rot6d_b, task), dim=-1)
+    if self.cfg.clutch_enabled:
+      twist = self._env.command_manager.get_term("twist")
+      command = torch.cat((command, (twist.mode == 1).float()[:, None]), dim=-1)
+    return command
 
   def _resample_command(self, env_ids: torch.Tensor) -> None:
     if self.scripted:
       return
+    if self.cfg.clutch_enabled:
+      self.moving_statistics[env_ids] = 0
     curriculum = (
       self._env.common_step_counter - self.cfg.curriculum_warmup_steps
     ) / self.cfg.curriculum_ramp_steps
@@ -297,6 +315,12 @@ class BimanualWristCommand(CommandTerm):
 
     pending = self.needs_initialization.nonzero().flatten()
     if len(pending) > 0:
+      if self.cfg.clutch_enabled:
+        self.transport_reference_pos[pending] = self.robot.data.root_link_pos_w[pending]
+        forward = torch.zeros(len(pending), 3, device=self.device)
+        forward[:, 0] = 1
+        axis = quat_apply(self.robot.data.root_link_quat_w[pending], forward)
+        self.transport_reference_yaw[pending] = torch.atan2(axis[:, 1], axis[:, 0])
       wrist_pos = self.robot_wrist_pos_w[pending]
       self.start_pos_w[pending] = wrist_pos
       self.target_pos_w[pending] = wrist_pos
@@ -346,6 +370,8 @@ class BimanualWristCommand(CommandTerm):
       self.elapsed[pending] = 0.0
       self.needs_initialization[pending] = False
 
+    if self.cfg.clutch_enabled and not self.scripted:
+      self._advance_transport_reference()
     self.elapsed += self._env.step_dt
     raw_phase = (
       (self.elapsed - self.scripted_delay_s) / self.scripted_duration_s
@@ -379,6 +405,29 @@ class BimanualWristCommand(CommandTerm):
       self.start_shoulder_height
       + height_blend * (self.final_shoulder_height - self.start_shoulder_height)
     )
+
+  def _advance_transport_reference(self) -> None:
+    twist = self._env.command_manager.get_term("twist")
+    if not twist.cfg.clutch_enabled:
+      raise ValueError("Both wrist and twist clutch_enabled must be true")
+    dt = self._env.step_dt
+    cmd = twist.command * (twist.mode == 1)[:, None]
+    yaw = self.transport_reference_yaw
+    c, s = torch.cos(yaw), torch.sin(yaw)
+    delta = torch.zeros_like(self.transport_reference_pos)
+    delta[:, 0] = (c * cmd[:, 0] - s * cmd[:, 1]) * dt
+    delta[:, 1] = (s * cmd[:, 0] + c * cmd[:, 1]) * dt
+    angle = cmd[:, 2] * dt
+    axis = torch.zeros_like(delta)
+    axis[:, 2] = 1
+    rotation = quat_from_angle_axis(angle, axis)[:, None, :].expand(-1, 2, -1)
+    center = self.transport_reference_pos[:, None, :]
+    for positions in (self.start_pos_w, self.final_pos_w):
+      positions.copy_(center + quat_apply(rotation, positions - center) + delta[:, None, :])
+    for orientations in (self.start_quat_w, self.final_quat_w):
+      orientations.copy_(quat_mul(rotation, orientations))
+    self.transport_reference_pos += delta
+    self.transport_reference_yaw += angle
 
   def set_scripted_trajectory(
     self,
@@ -497,6 +546,36 @@ class BimanualWristCommand(CommandTerm):
     self.metrics["shoulder_height"] = self.shoulder_height
     self.metrics["target_shoulder_height"] = self.target_shoulder_height
     self.metrics["target_wrist_height"] = self.desired_wrist_pos_w[..., 2].mean(-1)
+    if self.cfg.clutch_enabled:
+      twist = self._env.command_manager.get_term("twist")
+      xy_error = torch.linalg.vector_norm(twist.command[:, :2] - self.robot.data.root_link_lin_vel_b[:, :2], dim=-1)
+      yaw_error = (twist.command[:, 2] - self.robot.data.root_link_ang_vel_b[:, 2]).abs()
+      moving = torch.linalg.vector_norm(twist.command, dim=-1) > 1e-5
+      # Accumulate moving-only diagnostics over the episode: adjustment has
+      # already stopped at most terminal/reset snapshots, so instantaneous
+      # moving masks would lose precisely the cases we need to inspect.
+      self.moving_statistics[:, 0] += 1
+      self.moving_statistics[:, 1] += moving.float()
+      self.moving_statistics[:, 2] += xy_error * moving
+      self.moving_statistics[:, 3] += yaw_error * moving
+      self.moving_statistics[:, 4] += mean_pos_error * moving
+      self.moving_statistics[:, 5] += self.metrics["shoulder_height_error"] * moving
+      self.moving_statistics[:, 6] += torch.linalg.vector_norm(twist.command[:, :2], dim=-1) * moving
+      self.moving_statistics[:, 7] += twist.command[:, 2].abs() * moving
+      denominator = self.moving_statistics[:, 0].clamp_min(1)
+      for index, name in enumerate(("balance", "transport", "adjust")):
+        mask = (twist.mode == index).float()
+        active = mask * self.moving_statistics[:, 1] / denominator
+        self.metrics[f"{name}_fraction"] = mask
+        self.metrics[f"{name}_wrist_error_masked"] = mean_pos_error * mask
+        self.metrics[f"{name}_shoulder_error_masked"] = self.metrics["shoulder_height_error"] * mask
+        self.metrics[f"{name}_velocity_xy_error_masked"] = xy_error * mask
+        self.metrics[f"{name}_velocity_yaw_error_masked"] = yaw_error * mask
+        self.metrics[f"{name}_moving_fraction"] = active
+        self.metrics[f"{name}_moving_velocity_xy_error_masked"] = mask * self.moving_statistics[:, 2] / denominator
+        self.metrics[f"{name}_moving_velocity_yaw_error_masked"] = mask * self.moving_statistics[:, 3] / denominator
+        for column, suffix in ((4,"wrist_error"), (5,"shoulder_error"), (6,"command_xy"), (7,"command_yaw")):
+          self.metrics[f"{name}_moving_{suffix}_masked"] = mask * self.moving_statistics[:, column] / denominator
 
 
 @dataclass(kw_only=True)
@@ -513,6 +592,7 @@ class BimanualWristCommandCfg(CommandTermCfg):
   vertical_offset_range: tuple[float, float] = (-0.06, 0.06)
   orientation_angle_range: tuple[float, float] = (-0.25, 0.25)
   height_probability: float = 0.0
+  clutch_enabled: bool = False
   shoulder_height_range: tuple[float, float] = (0.72, 1.02)
   wrist_height_offset_range: tuple[float, float] = (-0.02, 0.02)
   low_reach_extension_range: tuple[float, float] = (0.08, 0.22)

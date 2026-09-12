@@ -1,6 +1,7 @@
 """G1 29-DoF pure-RL wrist tracking and recovery environment."""
 
 import math
+from dataclasses import fields
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
@@ -78,6 +79,9 @@ def unitree_g1_wrist_recovery_env_cfg(
   twist.ranges.lin_vel_x = (0.0, 0.0)
   twist.ranges.lin_vel_y = (0.0, 0.0)
   twist.ranges.ang_vel_z = (0.0, 0.0)
+  cfg.commands["twist"] = mdp.ClutchedVelocityCommandCfg(
+    **{f.name: getattr(twist, f.name) for f in fields(twist)}
+  )
   cfg.commands["wrists"] = mdp.BimanualWristCommandCfg(
     entity_name="robot",
     wrist_body_names=WRISTS,

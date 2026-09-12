@@ -189,6 +189,65 @@ two genuine valid groups without targeted improvement, or absent evidence for
 a safe next step; do not stop merely because a new JSON plan is not prewritten.
 Stage 5B remains paused until stationary lowering is established.
 
+## Stage 5B v3: explicit wrist transport clutch
+
+Stage 5A v3 passed all four independent training seeds (101/211/307/401).
+The earlier twist-only 5B v2 completed, but its world-fixed wrists and sustained
+travel commands conflict; its small wrist errors do not demonstrate locomotion.
+Do not promote that screen to Stage 6 or repeat it unchanged.
+
+The user authorized a binary wrist transport clutch and THREE episode types:
+transport (clutch=1, 25%), anchored body adjustment (clutch=0, 25%), and
+autonomous balance (clutch=0, zero command, 50%). These are terminal mixture
+fractions; motion exposure and amplitude ramp over 30k warmup/60k ramp steps.
+Transport wrist world poses are advected by an independent reference initialized
+at reset and integrated from commanded planar twist, NEVER from actual body
+motion. Shoulder height stays world-z. Anchored targets stay world-fixed.
+Adjustment commands start after 3 s, last at most 2 s, and have a cumulative
+commanded path-length budget of 8 cm and absolute yaw budget of 0.12 rad.
+These are command budgets, not hard constraints on actual robot displacement;
+recovery steps remain permitted. Modes stay constant within each episode.
+Smooth clutch switching is deferred to a separate later experiment.
+
+With the clutch enabled, append its binary value to actor/critic wrist commands.
+This changes observation dimensions: train fresh policies; do not resume old
+24-dimensional wrist-command checkpoints into the new model. Disabled defaults
+retain old observation dimensions and behavior. Planar/yaw quiet-motion penalties
+apply only when there is no requested motion, not during transport/adjustment;
+feet are not position-constrained. Existing zero-command penalties remain soft.
+
+Run both CPU checks (`check_wrist_command_sampling.py`, `check_wrist_clutch.py`),
+then a one-GPU smoke with all three modes active and inspected TB mode fractions
+and finite metrics before full training. The first group is
+`experiments/stage5b_clutch_screen_v3.json`: one GPU and 4,096 global environments
+per run, 16,384 concurrently across four runs, seed 1802, 5,000 iterations.
+Only the common linear/yaw tracking reward scale changes (1/2/4/8).
+Keep corrected stationary 5A height settings unchanged.
+
+Report normalized per-mode wrist/shoulder errors and moving-only velocity errors;
+divide `_masked` numerators by the matching mode/moving fraction. Do not treat
+zero-command balance samples or post-adjustment stops as successful locomotion.
+Stationary retention requires balance wrist <2 cm, height-active wrist <4 cm,
+height shoulder <5 cm, final-100 episode length >=590/600, and no systematic
+backward lean. Moving transport/adjustment must additionally have per-mode wrist
+<4 cm and moving-only xy/yaw error <0.05 m/s and <0.10 rad/s respectively.
+Moving-only wrist error must also be <4 cm; xy/yaw errors must each be below
+50% of the respective moving-only commanded magnitude. This prevents a standing
+policy from passing merely because the requested adjustment speed is small.
+Moving statistics accumulate over each episode before reset; non-moving wrist
+metrics remain command-reset snapshots. Unavailable moving fractions cannot pass.
+These fixed gates are provisional training diagnostics, not held-out guarantees.
+Compare per-mode precision, moving errors, terminations, and smoothness rather
+than total reward. Preserve every checkpoint. No automatic two-hour evaluator.
+
+Authorize at most THREE registered 5B v3 groups (screen, one justified follow-up
+if needed, and independent-seed confirmation). No unlimited loop. If the gate
+passes, confirm the unchanged winner on at least three independent seeds. If
+unmet, allow one evidence-based single-factor follow-up within budget; do not
+weaken gates. Stop after exhausted budget, diagnosed repeated crashes, absent
+safe next intervention, or after successful confirmation. Stage 6 remains blocked
+on mapped trajectory data/interface. Send existing group summaries by email.
+
 Example:
 
 ```bash

@@ -27,6 +27,15 @@ def conditional_metrics(means: dict[str, float]) -> dict[str, float | None]:
       key = prefix + name  # Historical v2 names were also masked numerators.
     if key in means:
       result[name] = means[key] / denominator if denominator > 0.0 else None
+  for mode in ("balance", "transport", "adjust"):
+    for suffix in ("wrist_error", "shoulder_error", "velocity_xy_error", "velocity_yaw_error",
+                   "moving_velocity_xy_error", "moving_velocity_yaw_error", "moving_wrist_error",
+                   "moving_shoulder_error", "moving_command_xy", "moving_command_yaw"):
+      key = prefix + mode + "_" + suffix + "_masked"
+      fraction_key = prefix + mode + ("_moving_fraction" if suffix.startswith("moving_") else "_fraction")
+      if key in means and fraction_key in means:
+        denominator = means[fraction_key]
+        result[mode + "_" + suffix] = means[key] / denominator if denominator > 0 else None
   return result
 
 
