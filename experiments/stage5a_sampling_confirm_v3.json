@@ -1,0 +1,23 @@
+{
+  "group": "g1_stage5a_sampling_confirm_v3",
+  "mode": "independent-seed-confirmation",
+  "hypothesis": "The corrected v3 screen winner—50% height-active episodes with the moderate 0.78--0.98 m shoulder-target curriculum—reliably satisfies the predeclared stationary Stage 5A training diagnostics across independent training seeds while retaining non-height wrist control and posture safety.",
+  "task": "Unitree-G1-Wrist-Recovery-Teacher",
+  "common_args": [
+    "--env.scene.num-envs=4096",
+    "--agent.max-iterations=5000",
+    "--agent.logger=tensorboard",
+    "--env.commands.wrists.reach-probability=0.50",
+    "--env.commands.wrists.asymmetric-probability=0.50",
+    "--env.commands.wrists.wrist-height-offset-range", "(-0.02,0.02)",
+    "--env.commands.wrists.low-reach-extension-range", "(0.06,0.14)",
+    "--env.commands.wrists.height-probability=0.50",
+    "--env.commands.wrists.shoulder-height-range", "(0.78,0.98)"
+  ],
+  "runs": [
+    {"name": "seed101", "gpu": 0, "seed": 101, "args": []},
+    {"name": "seed211", "gpu": 1, "seed": 211, "args": []},
+    {"name": "seed307", "gpu": 2, "seed": 307, "args": []},
+    {"name": "seed401", "gpu": 3, "seed": 401, "args": []}
+  ]
+}

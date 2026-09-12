@@ -928,3 +928,134 @@
   use the remaining two groups for justified controlled 5A improvement or seed
   confirmation, rather than stopping merely because this first group misses
   the gate. Stage 5B remains paused.
+
+### Stage 5A corrected-sampling screen result (`g1_stage5a_sampling_screen_v3`)
+
+- Hypothesis and exact change: this first budgeted Stage 5A group repeated the
+  35%/50% height-task exposure by moderate/deep shoulder-target-depth screen
+  after fixing indexed sampling writeback.  It retained the coupled wrist
+  targets, height-active Huber losses, zero planar twist, normal warmup/ramp,
+  PPO/rewards, 0.50 reach and asymmetric probabilities, residual wrist-height
+  range +/-0.02 m, low-reach extension 0.06--0.14 m, and fixed seed 1701.
+  Every sibling used one H20 and 4,096 environments per run (4,096 global per
+  run; 16,384 concurrent across the four independent runs), for 5,000 PPO
+  iterations.  The plan contains no automatic held-out evaluation.
+- Status: all four named siblings exited 0 and completed normally at iteration
+  4999.  Their TensorBoard event files contain 5,000 finite samples for every
+  inspected scalar and final `model_4999.pt` checkpoints are preserved.  Exit
+  codes, log tails, and final-100 windows show no traceback, numerical issue,
+  CUDA/Warp/infrastructure failure, NaN, or divergence.  Remote status after
+  completion showed no tmux session, GPU process, or active full DDP job.
+- Command validation and final-100 conditional diagnostics: actual height
+  command fractions were 0.3480/0.5001/0.3512/0.4960 for
+  35%-moderate/50%-moderate/35%-deep/50%-deep.  Corresponding actual final
+  shoulder/wrist targets were 0.8795/0.5307, 0.8799/0.5313,
+  0.7590/0.4104, and 0.7603/0.4117 m, respectively, consistent with the
+  configured moderate (0.78--0.98 m) and deep (0.62--0.90 m) curricula and
+  the approximately 0.349 m coupled vertical gap.  Conditional height-active
+  wrist errors were 0.475/0.369/0.463/0.405 cm; shoulder errors were
+  0.562/0.396/0.524/0.403 cm; and non-height wrist errors were
+  0.418/0.427/0.438/0.559 cm.  These are normalized conditional values, not
+  raw `_masked` population numerators.
+- Gate and provisional ranking: all siblings satisfy the stationary 5A
+  training diagnostic gate: both height errors are below 4/5 cm, final-100
+  episode length is 599.22/599.45/598.83/598.97 of 600 (above 590), non-height
+  wrist error is below 2 cm, and backward-lean projection is only
+  0.00045/0.00059/0.00109/0.00075 with zero or 0.00031 termination count per
+  logged batch.  `active050_moderate` is the provisional fixed-seed winner:
+  it has the lowest height-active wrist and shoulder errors, nearly full
+  episodes, the lowest action acceleration (0.7411), and lower foot stagger
+  (0.1278) than the other candidates.  This is training evidence only and not
+  a final-policy or held-out claim.
+- Decision: promote the unchanged 50%-active moderate curriculum to
+  independent-seed confirmation rather than tune a passing configuration.
+  `g1_stage5a_sampling_confirm_v3` is the second of at most three authorized
+  5A registered groups (2/3 on launch): four one-GPU runs with seeds
+  101/211/307/401, 4,096 environments per run, and 5,000 iterations.  It
+  omits an evaluation block; all checkpoints remain preserved and Stage 5B
+  stays paused until confirmation is reviewed.
+
+### Stage 5A independent-seed confirmation result (`g1_stage5a_sampling_confirm_v3`)
+
+- Hypothesis and exact change: this second of at most three authorized Stage 5A
+  groups held the corrected-sampling, 50%-height-active moderate curriculum
+  unchanged (coupled shoulder range 0.78--0.98 m, wrist residual +/-0.02 m,
+  reach/asymmetric probability 0.50, zero planar twist, normal warmup/ramp,
+  rewards, and PPO) and tested independent seeds 101/211/307/401.  Each
+  sibling used one H20 with 4,096 environments per run (4,096 global per run;
+  16,384 concurrent across the group) for 5,000 PPO iterations.  The group
+  has no automatic held-out evaluation.
+- Status: all supplied exit codes are 0; every run reached iteration 4999,
+  preserved a `model_4999.pt`, and has 5,000 finite samples for all inspected
+  TensorBoard scalars.  Preserved train-log tails contain no traceback, NaN,
+  divergence, CUDA/Warp, or infrastructure error.  Post-completion remote
+  status has no tmux session, GPU process, or active full-DDP job.
+- Command validation and aggregate final-100 conditional diagnostics: actual
+  height fractions are 0.5031/0.5024/0.4999/0.4970, and actual active final
+  shoulder/wrist targets are 0.8792/0.5305, 0.8807/0.5320, 0.8812/0.5328, and
+  0.8804/0.5318 m.  Thus targets match the configured moderate range and keep
+  the coupled vertical gap at 0.3484--0.3487 m.  Conditional height-active
+  wrist error is 0.367/0.443/0.416/0.475 cm (mean 0.425, sample SD 0.047);
+  shoulder error is 0.357/0.454/0.427/0.464 cm (mean 0.425, SD 0.047); and
+  non-height wrist error is 0.384/0.480/0.491/0.590 cm (mean 0.486, SD 0.085).
+  These are normalized conditional values, never raw `_masked` numerators.
+  Final-100 episode length is 599.46/599.06/599.18/598.57 (mean 599.07), and
+  backward-lean projection is 0.00111/0.00080/0.00071/0.00065 with at most
+  0.00125 backward-lean terminations per logged batch.  Action acceleration
+  is 0.735/0.822/0.797/0.859 and foot stagger 0.159/0.132/0.138/0.146 m;
+  these are retained as provisional training-quality diagnostics only.
+- Gate and decision: every independent seed passes the fixed stationary 5A
+  gate (height wrist <4 cm, shoulder <5 cm, episode length >=590, non-height
+  wrist <2 cm, and no systematic backward-lean failure).  The confirmation
+  establishes stationary lowering across seeds, but does not make a final
+  policy claim or replace the user's visual/fixed-held-out review.  Promote
+  to the next defined conceptual factor, gradual planar twist: launch the
+  registered fixed-seed `g1_stage5b_twist_screen_v2` screen, retaining the
+  confirmed 50%-moderate stationary mixture while crossing only twist exposure
+  (25%/50%) and low/medium amplitude.  No evaluation block is included and all
+  confirmation checkpoints remain preserved.
+
+### Stage 5B gradual planar-twist screen v2 result (`g1_stage5b_twist_screen_v2`)
+
+- Hypothesis and exact change: following the independently confirmed stationary
+  Stage 5A 50%-active moderate curriculum, this fixed-seed screen changed only
+  planar-twist exposure (25% or 50%) and command amplitude (low: x/y/yaw
+  +/-0.10/+/-0.05/+/-0.10; medium: +/-0.20/+/-0.10/+/-0.20). All runs kept
+  the 50% coupled moderate shoulder-height mixture, wrist/reach settings,
+  rewards, PPO, warmup, and seed 1801. Each sibling used one H20 with 4,096
+  environments per run (4,096 global per run; 16,384 concurrent across the
+  four independent runs) for 5,000 PPO iterations. The plan has no automatic
+  held-out evaluation.
+- Status: all four supplied exit codes are 0 and all runs reached iteration
+  4999. Each remote TensorBoard stream has 5,000 finite samples for inspected
+  scalars, its final 100-window has no non-finite tag, and all final
+  `model_4999.pt` checkpoints (11 MiB) are preserved. Direct train-log tails
+  contain no traceback, NaN, divergence, CUDA/Warp, configuration, or
+  infrastructure failure. Post-completion remote status has no tmux session,
+  GPU process, or active full-DDP job.
+- Command validation and final-100 conditional diagnostics, ordered as
+  25%-low / 50%-low / 25%-medium / 50%-medium: actual height fractions were
+  0.5024/0.4983/0.4967/0.4987; active final shoulder/wrist targets were
+  0.8806/0.5321, 0.8808/0.5324, 0.8795/0.5307, and 0.8794/0.5308 m. These
+  match the moderate configured range and retain the coupled 0.3484--0.3488 m
+  vertical gap. Conditional height-active wrist errors were
+  0.488/0.392/0.570/0.508 cm; shoulder errors 0.468/0.430/0.536/0.524 cm; and
+  non-height wrist errors 0.639/0.445/0.681/0.705 cm. These values are
+  normalized conditional metrics, not raw `_masked` population numerators.
+  Mean final-100 episode lengths were 598.41/599.12/597.73/598.22 of 600, and
+  backward-lean termination was zero in every sibling; backward-lean
+  projections were only 0.00054/0.00076/0.00096/0.00056.
+- Provisional comparison and stopping decision: `active50_low` provides the
+  best combined training diagnostics: lowest x-y/yaw velocity error
+  (0.1640/0.6337), lowest height-active wrist error, lowest action acceleration
+  (0.7807), and the highest episode length. Medium amplitude is consistently
+  worse on velocity tracking (x-y 0.1951/0.1993, yaw 0.7946/0.7001), wrist
+  retention, and action acceleration (0.9189/0.8269); it also has higher
+  bad-orientation termination counts. `active50_low` is consequently the
+  conservative provisional Stage 5B checkpoint:
+  `/home/dev/unitree_rl_mjlab/logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-12_11-12-34/model_4999.pt`.
+  This is not a final policy claim: no complete held-out matrix was run, and
+  the user retains final visual/fixed-suite judgment. Stop autonomous
+  training: Stage 5B defines no further controlled factor or quantitative
+  promotion criterion, and Stage 6 requires the absent mapped-trajectory
+  split/interface contract. Launching another run would not be evidence-based.

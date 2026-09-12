@@ -1,0 +1,43 @@
+{
+  "group": "g1_stage5b_twist_screen_v2",
+  "mode": "parameter-screening",
+  "hypothesis": "The independently confirmed stationary Stage 5A curriculum—50% coupled moderate shoulder-height commands—retains its height and non-height wrist control under gradual planar twist; initial command exposure and amplitude determine a safe Stage 5B operating range.",
+  "task": "Unitree-G1-Wrist-Recovery-Teacher",
+  "common_args": [
+    "--env.scene.num-envs=4096",
+    "--agent.max-iterations=5000",
+    "--agent.logger=tensorboard",
+    "--env.commands.wrists.reach-probability=0.50",
+    "--env.commands.wrists.asymmetric-probability=0.50",
+    "--env.commands.wrists.wrist-height-offset-range", "(-0.02,0.02)",
+    "--env.commands.wrists.low-reach-extension-range", "(0.06,0.14)",
+    "--env.commands.wrists.height-probability=0.50",
+    "--env.commands.wrists.shoulder-height-range", "(0.78,0.98)"
+  ],
+  "runs": [
+    {"name": "active25_low", "gpu": 0, "seed": 1801, "args": [
+      "--env.commands.twist.rel-standing-envs=0.75",
+      "--env.commands.twist.ranges.lin-vel-x", "(-0.10,0.10)",
+      "--env.commands.twist.ranges.lin-vel-y", "(-0.05,0.05)",
+      "--env.commands.twist.ranges.ang-vel-z", "(-0.10,0.10)"
+    ]},
+    {"name": "active50_low", "gpu": 1, "seed": 1801, "args": [
+      "--env.commands.twist.rel-standing-envs=0.50",
+      "--env.commands.twist.ranges.lin-vel-x", "(-0.10,0.10)",
+      "--env.commands.twist.ranges.lin-vel-y", "(-0.05,0.05)",
+      "--env.commands.twist.ranges.ang-vel-z", "(-0.10,0.10)"
+    ]},
+    {"name": "active25_medium", "gpu": 2, "seed": 1801, "args": [
+      "--env.commands.twist.rel-standing-envs=0.75",
+      "--env.commands.twist.ranges.lin-vel-x", "(-0.20,0.20)",
+      "--env.commands.twist.ranges.lin-vel-y", "(-0.10,0.10)",
+      "--env.commands.twist.ranges.ang-vel-z", "(-0.20,0.20)"
+    ]},
+    {"name": "active50_medium", "gpu": 3, "seed": 1801, "args": [
+      "--env.commands.twist.rel-standing-envs=0.50",
+      "--env.commands.twist.ranges.lin-vel-x", "(-0.20,0.20)",
+      "--env.commands.twist.ranges.lin-vel-y", "(-0.10,0.10)",
+      "--env.commands.twist.ranges.ang-vel-z", "(-0.20,0.20)"
+    ]}
+  ]
+}
