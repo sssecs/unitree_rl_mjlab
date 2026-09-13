@@ -39,3 +39,18 @@ def apply_stage5b_clutch_profile(env_cfg, mode="mixed"):
   wrists.wrist_height_offset_range = (-.02, .02)
   wrists.low_reach_extension_range = (.06, .14)
   print(f"[INFO] Stage 5B clutch replay: mode={mode}, curricula fully enabled")
+
+
+def apply_ground_workspace_profile(env_cfg, mode="mixed"):
+  """Replay ground25 training mixture or its conditional near-ground subset."""
+  if mode not in ("mixed", "ground"):
+    raise ValueError("Ground workspace supports --wrist-mode mixed or ground")
+  apply_stage5b_clutch_profile(env_cfg, "balance")
+  wrists = env_cfg.commands["wrists"]
+  wrists.height_spatial_sampling = True
+  wrists.low_reach_extension_range = (.02, .18)
+  wrists.ground_probability = .25 if mode == "mixed" else 1.
+  wrists.height_probability = .5 if mode == "mixed" else 1.
+  wrists.ground_wrist_height_range = (.16, .28)
+  wrists.ground_other_wrist_raise_range = (.10, .20)
+  print(f"[INFO] Ground workspace replay: {mode}; zero base command; wrist z=0.16..0.28m")

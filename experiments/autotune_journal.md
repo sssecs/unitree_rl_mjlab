@@ -1287,3 +1287,38 @@
   further or introduce new gait/body-endpoint variables. Old5B budget stays closed.
   Preserve mobile best-model aliases. No full automatic held-out evaluation;
   restore the event-driven watcher and email its existing group summaries.
+
+### Near-ground workspace screen v1 result and confirmation launch
+
+- Status: all four fixed-seed siblings (`ground00/10/25/40`) exited 0, reached
+  iteration 4999, preserved their final checkpoints, and have 5,000 finite
+  TensorBoard samples for every inspected scalar. Remote train-log tails contain
+  no traceback, NaN/divergence, configuration, CUDA/Warp, or infrastructure
+  failure; the post-completion remote host has no tmux sessions or GPU processes.
+  This is a normally completed training screen, not a held-out evaluation.
+- Final-100 normalized conditional diagnostics, ordered ground probability
+  0/10/25/40% within height episodes: height wrist/shoulder errors were
+  0.422/0.496, 0.596/0.694, 0.637/0.772, and 0.610/0.963 cm; non-height wrist
+  errors were 0.531/0.719/0.577/0.577 cm; mean episode lengths were
+  598.34/594.89/596.30/596.21 of 600; and backward-lean projections were
+  0.00046/0.00121/0.00070/0.00099, with zero backward-lean terminations. These
+  are conditional means, not raw masked numerators.
+- Command validation and near-ground result: `ground00` has no ground samples
+  and is only the spatial-sampler control. Positive-exposure final-100 ground
+  wrist/shoulder errors were 1.295/2.308, 0.812/0.969, and 0.737/1.167 cm for
+  10/25/40%, respectively. Their actual low-target means were
+  0.2201/0.2196/0.2188 m, all inside the fixed 0.16--0.28 m range and with
+  nonzero ground fractions. Every positive sibling passes the predeclared
+  <4-cm ground/overall height wrist, <5-cm shoulder, <2-cm non-height wrist,
+  >=590/600 episode-length, finite, and no-systematic-backward-lean gates.
+- Decision: choose 25% conditional ground exposure as the conservative
+  provisional winner. Its ground wrist result is only 0.075 cm behind 40%,
+  while it has better ground and overall shoulder precision, lower action
+  acceleration (1.003 vs 1.011), slightly longer episodes, and lower lean.
+  The fixed-seed screen ranks this setting only; it is not a final policy claim.
+  It satisfies the sole authorization for group 2/2: unchanged independent-seed
+  confirmation. `experiments/ground_workspace_confirm_v1.json` launches seeds
+  1902/1903/1904 on GPUs 0/1/2, 4,096 environments per one-GPU run (12,288
+  concurrent total), for 5,000 iterations. It contains no automatic held-out
+  evaluator. The configuration is unchanged from the completed safe full run,
+  so no additional runtime validation is required.

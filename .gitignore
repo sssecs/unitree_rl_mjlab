@@ -3,6 +3,7 @@
 outputs
 logs
 models/best_wrist/
+models/best_ground/
 results/
 wandb
 .autotune/

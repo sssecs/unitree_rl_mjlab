@@ -98,4 +98,20 @@ pip install -e .
 查看旧的无离合模型时同时指定 `G1_WRIST_CHECKPOINT=/旧模型路径`
 和 `G1_WRIST_PROFILE=legacy`，不要用新配置加载旧维度检查点。
 
+### 本地查看推荐低位工作空间模型
+
+当前筛选推荐 `ground25`，seed1901，远端来源
+`2026-09-13_03-22-39/model_4999.pt`。多 seed 确认结果未定，不是最终最佳策略。
+它单独保存在 `models/best_ground/model.pt`（附来源记录），不替换移动模型。
+
+```bash
+./tools/remote_fetch_best_ground_model.sh
+./tools/play_best_ground_model.sh --viewer native --wrist-mode ground
+```
+
+`ground` 每回合采样低位任务，随机低手，目标腕高 0.16--0.28 m；
+`mixed` 恢复训练分布（50% 高度任务，其中25%低位），全程零底盘指令。
+这是允许自主调整支撑的静止操作策略，不要用运输配置评判它的行走能力。
+可视化保留 play 模式的推力/负载，不等同于无扰动诊断。
+
 按照上述步骤完成后，您已经准备好在虚拟环境中运行相关程序。若遇到问题，请参考各组件的官方文档或检查依赖安装是否正确。
