@@ -1263,3 +1263,27 @@
   explicit anchored endpoint reference, anti-slip and validated step economy;
   procedural transport-only cadence is optional, never compulsory on recovery.
   Existing held-out/v3 gates are unchanged; do not retroactively promote scale12.
+
+### Authorized near-ground workspace screen v1
+
+- User authorized starting the reviewed workspace plan. Hypothesis: with
+  stationary body commands and independent bilateral spatial height sampling
+  fixed, unilateral low-target exposure improves depth control while retaining
+  moderate/nonheight wrist tasks. `ground00` is the new spatial-sampler control,
+  not a floor-reaching candidate or the exact older 5A distribution.
+- Reviewed plan `experiments/ground_workspace_screen_v1.json`: four independent
+  one-H20 runs, 4096 global environments per run (16384 concurrent), seed1901,
+  5000 iterations, from scratch; conditional ground fractions 0/10/25/40% within
+  the 50% height mixture, hence final overall exposure about 0/5/12.5/20%.
+  Wrist low targets are 0.16--0.28 m, other wrist raised 0.10--0.20 m, spatial
+  extension 0.02--0.18 m, normal 30k warmup/60k ramp. No velocity/cadence changes.
+- Prior 256-env/20-iteration sampling smoke exited0 with finite TB; actual low
+  target mean0.2187m. Both CPU regression checks passed again before full launch.
+  This is engineering validation, not a ground-reaching feasibility claim.
+- New bounded authorization: group1/2 is the screen; group2/2 only confirms an
+  unchanged passing positive-exposure candidate across >=3 independent seeds.
+  Gates and stopping rules are in `experiments/operation_workspace_next.md`.
+  If none passes, stop and diagnose; do not automatically lower the targets
+  further or introduce new gait/body-endpoint variables. Old5B budget stays closed.
+  Preserve mobile best-model aliases. No full automatic held-out evaluation;
+  restore the event-driven watcher and email its existing group summaries.
