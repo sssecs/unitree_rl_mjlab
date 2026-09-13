@@ -2,6 +2,7 @@
 .idea
 outputs
 logs
+models/best_wrist/
 results/
 wandb
 .autotune/

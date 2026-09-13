@@ -3,7 +3,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 PYTHON_BIN="${G1_MJLAB_PYTHON:-/mnt/hdd/miniforge3/envs/unitree_rl_mjlab/bin/python}"
-CHECKPOINT="${G1_WRIST_CHECKPOINT:-$PROJECT_ROOT/logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-10_12-12-08/model_4999.pt}"
+CHECKPOINT="${G1_WRIST_CHECKPOINT:-$PROJECT_ROOT/models/best_wrist/model.pt}"
 NUM_ENVS="${G1_PLAY_NUM_ENVS:-1}"
 MPL_CACHE="${MPLCONFIGDIR:-/tmp/g1-wrist-matplotlib-${UID}}"
 
@@ -29,4 +29,5 @@ exec "$PYTHON_BIN" scripts/play.py \
   Unitree-G1-Wrist-Recovery-Teacher \
   --checkpoint-file "$CHECKPOINT" \
   --num-envs "$NUM_ENVS" \
+  --wrist-profile "${G1_WRIST_PROFILE:-stage5b-clutch}" \
   "$@"

@@ -1103,3 +1103,127 @@
   authorize the reviewed full launch, consuming group 1/3; at most one
   justified single-factor follow-up and one independent-seed confirmation.
   No automatic full evaluator. Email only the existing analysis summaries.
+
+### Stage 5B clutch-v3 tracking-scale screen result (`g1_stage5b_clutch_screen_v3`)
+
+- Hypothesis and exact change: the first of at most three authorized clutch-v3
+  groups held the complete three-mode (50% balance / 25% transport / 25%
+  adjustment), world-z height, coupled moderate shoulder/wrist, clutch, command
+  ramp, PPO, and seed-1802 settings fixed. It screened only common linear/yaw
+  tracking-reward scales 1/2/4/8 (linear weights 1/2/4/8 and yaw weights
+  0.5/1/2/4). Each sibling used one H20 and 4,096 environments per run (4,096
+  global per run; 16,384 concurrent across the four independent runs) for 5,000
+  iterations. The plan contained no automatic held-out evaluation.
+- Status: all four named siblings exited 0, reached iteration 4999, preserved
+  final checkpoints, and logged 5,000 finite TensorBoard samples for every
+  inspected scalar. Remote log tails had no traceback, NaN/divergence, or
+  configuration/CUDA/Warp/infrastructure failure; post-run remote status had no
+  tmux session or GPU process. All three mode fractions and nonzero moving
+  transport/adjustment fractions were present, so their conditional diagnostics
+  are available. Actual final height-active shoulder/wrist targets were
+  0.8799/0.5312, 0.8802/0.5317, 0.8795/0.5308, and 0.8793/0.5308 m for
+  scales 1/2/4/8, matching the configured 0.78--0.98 m moderate curriculum and
+  coupled approximately 0.349 m gap.
+- Final-100 normalized conditional diagnostics, ordered by scale 1/2/4/8:
+  height-active wrist/shoulder errors were 0.423/0.444, 0.416/0.382,
+  0.531/0.487, and 0.710/0.716 cm; balance wrist errors were
+  0.490/0.461/0.505/0.697 cm; mean episode length was
+  598.87/599.08/598.89/599.07 of 600; and backward-lean projection was
+  0.00050/0.00092/0.00020/0.00033. Thus all stationary retention and per-mode
+  wrist (<4 cm) gates pass. Moving transport xy/yaw errors improved
+  0.116/0.493, 0.094/0.434, 0.086/0.367, and 0.080/0.289 m/s/rad/s; adjustment
+  values similarly improved to 0.073/0.275 at scale 8. However, every sibling
+  misses the fixed moving gate (xy <0.05, yaw <0.10, and each below half the
+  respective moving commanded magnitude). The scale-8 candidate is the best
+  provisional training diagnostic but is not a promoted policy or held-out
+  claim.
+- Baseline comparison and decision: the monotonic velocity improvement across
+  the only screened factor supports exactly one evidence-based follow-up within
+  the remaining 5B budget; low-scale values cannot meet the fixed gate, while
+  wrist retention remains well inside its bound. The reviewed follow-up plan
+  `experiments/stage5b_clutch_tracking_followup_v3.json` holds every task and
+  PPO setting fixed and screens only higher common scales 12/16/24. A 256-env,
+  one-GPU validation at the highest scale must first establish finite runtime
+  and PPO before this registered group may launch. This would consume group 2/3;
+  the sole remaining group is reserved for independent-seed confirmation only
+  if an unchanged winner passes the fixed training gate.
+- Validation launch: `g1_stage5b_clutch_tracking_validate_v3` is a one-H20,
+  256-environment (per-rank/global) 200-iteration runtime/PPO validation of the
+  highest proposed scale (linear/yaw weights 24/12), with the same three-mode
+  distribution and all other settings unchanged. It does not consume the 5B
+  registered-group budget. Its completion must be inspected in a new watcher
+  turn; no full group is launched in this completion-triggered turn.
+
+### Stage 5B clutch-v3 high-scale validation result (`g1_stage5b_clutch_tracking_validate_v3`)
+
+- Hypothesis and exact change: runtime/PPO validation of the highest proposed
+  common tracking scale only (linear/yaw 24/12), with the reviewed three-mode
+  clutch distribution and all other Stage 5B v3 settings unchanged.  One H20,
+  256 environments per rank/global, seed 1802, and 200 PPO iterations; this is
+  a validation, not a registered-group budget entry.
+- Status: exit code 0; the run completed all 200 iterations.  Its train-log
+  tail has no traceback or infrastructure/configuration failure, and all 200
+  inspected TensorBoard scalars are finite.  PPO progressed (final mean reward
+  24.41, surrogate loss -0.0199, value loss 54.10), and the remote host is
+  idle after completion.  This passes the required finite runtime/PPO gate.
+- Diagnostics: the normal 30k-step warmup left this short run entirely in
+  balance mode in the final-100 window (balance fraction 1.0; transport,
+  adjustment, height, and moving fractions 0).  Consequently the normalized
+  moving and height conditional metrics are unavailable, not zero or a gate
+  pass.  The short random-policy episode length (76.57/600) and balance wrist
+  error (0.600 m) are expected validation-only diagnostics and are not compared
+  with full-run learning gates.  No NaN or non-finite tag was present.
+- Decision: the risky high-scale change is runtime-safe and the prior screen's
+  monotonic tracking evidence still supports the single allowed follow-up.
+  Launch the reviewed registered `g1_stage5b_clutch_tracking_followup_v3`
+  screen at scales 12/16/24.  It consumes Stage 5B group 2/3: three independent
+  one-GPU runs with 4,096 environments per run (4,096 global each; 12,288
+  concurrent total), fixed seed 1802, and 5,000 iterations.  It has no
+  automatic held-out evaluator; preserve every checkpoint and reserve group
+  3/3 solely for independent-seed confirmation if an unchanged candidate
+  passes the fixed three-mode training diagnostics.
+
+### Stage 5B clutch-v3 high-scale follow-up result (`g1_stage5b_clutch_tracking_followup_v3`)
+
+- Hypothesis and exact change: the second of three authorized groups held the
+  entire clutch-v3 task, three-mode fractions, command ranges/ramp, stationary
+  height settings, PPO configuration, and fixed seed 1802 unchanged. It tested
+  only common linear/yaw velocity-tracking reward scales 12/16/24 (linear
+  weights 12/16/24; yaw weights 6/8/12). The three independent one-H20 runs
+  used 4,096 environments each (4,096 per-rank/global per run; 12,288
+  concurrently) for 5,000 iterations. No automatic held-out evaluator was run.
+- Status: supplied exit codes are 0 for `track12`, `track16`, and `track24`;
+  each has a DONE marker, completed a 5,000-sample finite TensorBoard history,
+  and preserved `model_4999.pt`. Read-only remote status after completion showed
+  no tmux sessions or GPU processes. TensorBoard summaries found no non-finite
+  tag, and the completed-run logs/provenance contain no reported code,
+  configuration, CUDA/Warp, or infrastructure failure. Checkpoints are
+  respectively under `2026-09-12_20-17-07`, `20-17-13`, and `20-17-19` in
+  `logs/rsl_rl/g1_wrist_recovery_teacher/`.
+- Command and stationary diagnostics: actual final height-active shoulder/wrist
+  targets were 0.8804/0.5318, 0.8810/0.5325, and 0.8797/0.5313 m, consistent
+  with the configured 0.78--0.98 m shoulder range and 0.3485--0.3486 m coupled
+  gap. Final-100 normalized conditional height wrist/shoulder errors were
+  0.894/1.052, 1.000/1.074, and 1.741/1.089 cm; balance wrist errors were
+  0.860/1.192/1.980 cm; and mean episode length was 598.60/598.11/596.65 of
+  600 for scales 12/16/24. Thus stationary and per-mode wrist retention remain
+  inside the fixed bounds, but this does not establish moving-task success.
+- Moving diagnostics and baseline comparison: normalized transport moving
+  xy/yaw errors were 0.0666/0.2308, 0.0724/0.2547, and 0.0708/0.2274 m/s and
+  rad/s; adjustment moving errors were 0.0642/0.2190, 0.0657/0.2313, and
+  0.0657/0.2098. Corresponding transport commanded magnitudes were about
+  0.059/0.050 and adjustment magnitudes about 0.0295/0.0297. Scale 12 improves
+  over the preceding scale-8 provisional transport result (0.080/0.289), but
+  every sibling misses the fixed xy <0.05 and yaw <0.10 gates and is also above
+  half its respective moving commanded magnitude. Raising the scale from 12 to
+  16/24 worsens xy tracking and wrist/foot/action diagnostics, so there is no
+  monotonic evidence for another increase. These are normalized conditional
+  values, not raw `_masked` numerators, and remain training diagnostics only.
+- Decision: stop autonomous Stage 5B work. This group consumes 2/3; the only
+  remaining group is explicitly reserved for independent-seed confirmation of
+  an unchanged candidate that passes the fixed three-mode gate. No sibling
+  passes, so confirmation is not authorized, and the plan permits no further
+  controlled intervention or gate relaxation. Preserve all checkpoints;
+  `track12/model_4999.pt` is the least-bad provisional moving candidate from
+  this group, not a promoted or held-out-validated policy. Stage 6 remains
+  blocked on the mapped trajectory data/interface.

@@ -33,6 +33,10 @@ class PlayConfig:
   camera: int | str | None = None
   viewer: Literal["auto", "native", "viser"] = "auto"
   no_terminations: bool = False
+  wrist_profile: Literal["legacy", "stage5b-clutch"] = "legacy"
+  """Optional wrist task command profile; does not load arbitrary training YAML."""
+  wrist_mode: Literal["mixed", "transport", "adjust", "balance"] = "mixed"
+  """Choose a clutch episode type, or the training mixture."""
   """Disable all termination conditions (useful for viewing motions with dummy agents)."""
 
   # Internal flag used by demo script.
@@ -46,6 +50,12 @@ def run_play(task_id: str, cfg: PlayConfig):
 
   env_cfg = load_env_cfg(task_id, play=True)
   agent_cfg = load_rl_cfg(task_id)
+
+  if cfg.wrist_profile == "stage5b-clutch":
+    from src.tasks.wrist_recovery.play_profile import apply_stage5b_clutch_profile
+    apply_stage5b_clutch_profile(env_cfg, cfg.wrist_mode)
+  elif cfg.wrist_mode != "mixed":
+    raise ValueError("--wrist-mode requires --wrist-profile stage5b-clutch")
 
   DUMMY_MODE = cfg.agent in {"zero", "random"}
   TRAINED_MODE = not DUMMY_MODE
