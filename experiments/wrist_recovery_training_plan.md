@@ -194,7 +194,10 @@ Stage 5B remains paused until stationary lowering is established.
 Latest user-requested operation-first diagnosis and optional near-ground sampler
 are documented in `experiments/operation_workspace_next.md`. This is a separate
 development proposal; do not retroactively weaken the fixed v3 promotion gates
-or restart full training from that proposal alone. Preserve old checkpoints.
+or restart full training from that proposal alone. The latest user authorization
+now permits the workspace-only screen and conditional confirmation under the
+TWO-group budget and gates in that file. Preserve old checkpoints; other Stage
+5B budgets remain closed. Do not introduce gait changes in the workspace screen.
 
 Stage 5A v3 passed all four independent training seeds (101/211/307/401).
 The earlier twist-only 5B v2 completed, but its world-fixed wrists and sustained

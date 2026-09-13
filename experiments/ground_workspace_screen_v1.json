@@ -1,7 +1,7 @@
 {
   "group": "g1_ground_workspace_screen_v1",
   "mode": "parameter-screening",
-  "hypothesis": "With stationary body commands and bilateral spatial height sampling held fixed, increasing unilateral low-workspace exposure improves near-ground wrist control without losing moderate-height retention. Reviewed proposal only; not launched.",
+  "hypothesis": "With stationary body commands and bilateral spatial height sampling held fixed, increasing unilateral low-workspace exposure improves near-ground wrist control without losing moderate-height retention. User-authorized group 1/2; confirm a passing positive-exposure candidate only.",
   "task": "Unitree-G1-Wrist-Recovery-Teacher",
   "common_args": [
     "--env.scene.num-envs=4096", "--agent.max-iterations=5000", "--agent.logger=tensorboard",

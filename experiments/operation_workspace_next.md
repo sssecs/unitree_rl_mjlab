@@ -121,8 +121,35 @@ Recommended first intervention is task-conditioned, phase-free step economy:
 Do not simultaneously change workspace, reward scales, cadence, speeds, and DR.
 Sequence: diagnose -> workspace-only smoke/screen -> operation progress interface
 -> step-economy ablation -> optional cadence ablation -> independent seeds.
-No new full training budget or watcher restart is authorized by this file.
-Prepared, unlaunched workspace-only plan: `experiments/ground_workspace_screen_v1.json`.
+## User-authorized workspace training budget
+
+The user has now authorized starting the workspace-only training. Use
+`experiments/ground_workspace_screen_v1.json` as group 1 of at most TWO registered
+groups: this fixed-seed screen, then independent-seed confirmation ONLY if a
+positive-ground-exposure candidate passes the following provisional gates.
+Every run uses one GPU, 4096 global envs, <=5000 iterations. Keep commands,
+rewards, PPO and physics fixed; screen only conditional ground exposure.
+Do not automatically introduce cadence, locomotion rewards, endpoint interfaces,
+or the deeper 0.08--0.18-m range during this budget.
+
+Final-100 normalized ground wrist error <4 cm, ground shoulder error <5 cm,
+overall height wrist <4 cm/shoulder <5 cm, nonheight wrist <2 cm, episode length
+>=590/600, finite metrics and no systematic backward-lean termination are
+required. Actual low target must be inside 0.16--0.28 m with nonzero ground
+fraction; absence of ground samples cannot pass. Retain the unchanged ground00
+control as reference; it cannot be a near-ground winner. Rank exposure/precision,
+terminations and smoothness, not total reward or tiny single-seed differences.
+These reset snapshots remain diagnostics, not full-trajectory held-out success.
+
+If a candidate passes, confirm its unchanged settings on >=3 independent seeds
+as group 2/2. Otherwise stop with a diagnosed failure and a proposed next factor;
+do not weaken gates or loop on the same failing setup. After confirmation stop
+for user visual review and a decision on deeper reach or motion changes.
+Preserve checkpoints and best-model aliases; do not overwrite the current
+recommended mobile checkpoint with a stationary workspace model automatically.
+No automatic full evaluator. Send only the existing analysis summary by email.
+
+Workspace-only plan: `experiments/ground_workspace_screen_v1.json`.
 Four one-GPU runs, 4096 envs/run, 5000 iterations, seed 1901, conditional ground
 exposure 0/10/25/40%. All use zero base commands; this is NOT a locomotion
 confirmation and temporarily isolates depth feasibility from gait changes.
