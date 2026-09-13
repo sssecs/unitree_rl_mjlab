@@ -35,6 +35,9 @@ def fixture(shoulder_range=(0.78, 0.98), step=90000):
   n = 1024
   cfg = NS(
     clutch_enabled=False,
+    ground_probability=0., height_spatial_sampling=False,
+    ground_wrist_height_range=(.08,.18), ground_other_wrist_raise_range=(.10,.20),
+    height_lateral_offset_range=(-.04,.04),
     curriculum_warmup_steps=30000, curriculum_ramp_steps=60000,
     reach_probability=0.0, asymmetric_probability=0.0, height_probability=1.0,
     extension_range=(0.12, 0.28), shoulder_height_range=shoulder_range,
@@ -49,6 +52,10 @@ def fixture(shoulder_range=(0.78, 0.98), step=90000):
     setattr(x, name, torch.zeros(n))
   for name in ("height_active", "is_asymmetric", "needs_initialization"):
     setattr(x, name, torch.zeros(n, dtype=torch.bool))
+  x.ground_active = torch.zeros(n,dtype=torch.bool)
+  x.ground_side = torch.zeros(n,dtype=torch.long)
+  x.sampled_ground_wrist_height = torch.zeros(n)
+  x.sampled_other_wrist_raise = torch.zeros(n)
   for name in ("sampled_offset_b", "sampled_axis_angle_b", "target_lin_vel_w", "start_pos_w",
                "target_pos_w", "previous_target_pos_w", "final_pos_w"):
     setattr(x, name, torch.zeros(n, 2, 3))
@@ -72,6 +79,19 @@ def main():
            "quat_mul": identity_delta_mul, "quat_from_angle_axis": from_angle_axis}
   exec(compile(ast.Module(body=methods, type_ignores=[]), str(source), "exec"), scope)
   sample, update = scope["_resample_command"], scope["_update_command"]
+  x = fixture()
+  x.cfg.ground_probability=1.
+  x.cfg.height_spatial_sampling=True
+  ground_ids=torch.arange(0,1024,2)
+  sample(x,ground_ids)
+  update(x)
+  low=x.final_pos_w[ground_ids,:,2].min(-1).values
+  assert torch.allclose(low,x.sampled_ground_wrist_height[ground_ids],atol=1e-6)
+  assert low.min()>=.08 and low.max()<=.18
+  assert (x.final_pos_w[ground_ids,:,2].max(-1).values-low).min()>=.09999
+  assert x.sampled_offset_b[ground_ids,:,1].std()>.01
+  assert torch.count_nonzero(x.ground_active[1::2])==0
+  print('PASS unilateral ground heights, bilateral spatial coverage, and reset isolation')
   torch.manual_seed(1701)
   ids = torch.arange(0, 1024, 2).flip(0)  # Noncontiguous, permuted reset subset.
   for bounds in ((0.78, 0.98), (0.62, 0.90)):

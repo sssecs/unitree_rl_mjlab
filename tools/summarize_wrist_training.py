@@ -36,6 +36,12 @@ def conditional_metrics(means: dict[str, float]) -> dict[str, float | None]:
       if key in means and fraction_key in means:
         denominator = means[fraction_key]
         result[mode + "_" + suffix] = means[key] / denominator if denominator > 0 else None
+  if prefix+"ground_fraction" in means:
+    denominator=means[prefix+"ground_fraction"]
+    for suffix in ("wrist_error", "shoulder_error", "low_target"):
+      key=prefix+"ground_"+suffix+"_masked"
+      if key in means:
+        result["ground_"+suffix]=means[key]/denominator if denominator>0 else None
   return result
 
 

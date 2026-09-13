@@ -23,6 +23,11 @@ REMOTE_SESSION="eval_$EVAL_NAME"
 LOCAL_OUTPUT="results/remote_eval/$EVAL_NAME"
 POLL_SECONDS="${EVAL_POLL_SECONDS:-15}"
 MAX_WAIT_SECONDS="${EVAL_MAX_WAIT_SECONDS:-3600}"
+EVALUATOR_SCRIPT="${G1_EVALUATOR_SCRIPT:-scripts/evaluate_wrist_recovery.py}"
+case "$EVALUATOR_SCRIPT" in
+  scripts/evaluate_wrist_recovery.py|scripts/diagnose_wrist_clutch.py) ;;
+  *) echo "Unsupported evaluator script: $EVALUATOR_SCRIPT"; exit 1 ;;
+esac
 
 has_local_result() {
   [ -d "$LOCAL_OUTPUT" ] \
@@ -84,7 +89,7 @@ export LD_LIBRARY_PATH=\"\$CONDA_PREFIX/cuda-compat:/home/dev/nvidia-550.127/lib
 export LD_PRELOAD=/home/dev/nvidia-550.127/lib/libnvidia-ml.so.1
 export NCCL_CUMEM_HOST_ENABLE=0
 cd '$REMOTE_REPO'
-python scripts/evaluate_wrist_recovery.py \
+python '$EVALUATOR_SCRIPT' \
   --checkpoint-file '$REMOTE_CHECKPOINT' \
   --output-dir '$REMOTE_OUTPUT'$EXTRA_ARGS \
   2>&1 | tee '$REMOTE_JOB/evaluate.log'

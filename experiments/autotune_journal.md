@@ -1227,3 +1227,39 @@
   `track12/model_4999.pt` is the least-bad provisional moving candidate from
   this group, not a promoted or held-out-validated policy. Stage 6 remains
   blocked on the mapped trajectory data/interface.
+
+### Operation-first diagnosis and optional near-ground sampler
+
+- User requested short diagnosis, expanded wrist coverage toward floor pickup,
+  and literature review of large transport steps/small adjustments without human
+  references. No full training group or watcher restart was requested/started.
+- Nominal scale-12 diagnosis uses 12 envs, seed 9187, one 12-second rollout,
+  no pushes, payload, startup DR, or observation corruption. Six cases have two
+  envs each. Outputs: `results/remote_eval/clutch12_nominal_diag_v1` and `v2`.
+  V2 is the primary enriched diagnosis; no falls in any case. Forward/backward
+  signed speed is +0.0884/-0.0950 m/s to +/-0.1 commands; projected net travel
+  +1.064/-1.140 m. Nominal zero-command absolute yaw is 0.00967 rad/s.
+  Wrist mean remains below 0.8 cm in each nominal case. The poor pooled training
+  velocity statistics therefore do not imply inability to transport.
+- Contact-foot speeds 0.0661/0.0540 m/s and sparse >=100ms-flight touchdowns
+  suggest dragging/sliding or very brief flight; do not claim normal large steps.
+  The isolated 0.960-m same-foot displacement includes time between events and
+  is not verified swing stride. Adjustment responds ~0.0121 m/s to 0.04 and
+  retains only +0.00766 m after an +0.08-m command budget; endpoint retention,
+  not merely instantaneous speed tolerance, needs improvement. Pure transport
+  yaw responds 0.0466 to 0.1 rad/s; anchored yaw responds 0.0135 to 0.06.
+- Optional sampler adds independent bilateral height-task forward/lateral
+  offsets and unilateral near-ground targets, deriving shoulders from the
+  selected wrist's initial vertical gap. Other wrist is raised 0.10--0.20 m;
+  no independent incompatible standing-height requirement. Old defaults and
+  observation dimensions remain unchanged. CPU regression tests pass.
+- `g1_ground_sampling_smoke_v1`: GPU1, 256 envs, 20 iterations, zero twist,
+  all-ground/all-height, wrist range 0.16--0.28 m, finite TB. Actual final-10
+  low target mean 0.2187 m, shoulder 0.5666 m, bilateral wrist 0.2936 m.
+  Large random-policy errors/falls are runtime validation only, not successful
+  floor reaching. Do not infer full-body feasibility from vertical coupling.
+- Detailed staged implementation/research proposal and primary source links
+  are in `experiments/operation_workspace_next.md`. Prioritize task progress,
+  explicit anchored endpoint reference, anti-slip and validated step economy;
+  procedural transport-only cadence is optional, never compulsory on recovery.
+  Existing held-out/v3 gates are unchanged; do not retroactively promote scale12.

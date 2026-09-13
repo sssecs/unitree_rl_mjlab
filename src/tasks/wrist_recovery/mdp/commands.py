@@ -36,10 +36,15 @@ class BimanualWristCommand(CommandTerm):
       raise ValueError("asymmetric_probability must be in [0, 1].")
     if not 0.0 <= cfg.height_probability <= 1.0:
       raise ValueError("height_probability must be in [0, 1].")
+    if not 0.0 <= cfg.ground_probability <= 1.0:
+      raise ValueError("ground_probability must be in [0, 1].")
     for name, bounds in (
       ("shoulder_height_range", cfg.shoulder_height_range),
       ("wrist_height_offset_range", cfg.wrist_height_offset_range),
       ("low_reach_extension_range", cfg.low_reach_extension_range),
+      ("ground_wrist_height_range", cfg.ground_wrist_height_range),
+      ("ground_other_wrist_raise_range", cfg.ground_other_wrist_raise_range),
+      ("height_lateral_offset_range", cfg.height_lateral_offset_range),
     ):
       if bounds[0] > bounds[1]:
         raise ValueError(f"{name} lower bound exceeds upper bound: {bounds}")
@@ -83,6 +88,10 @@ class BimanualWristCommand(CommandTerm):
     self.height_active = torch.zeros(
       self.num_envs, dtype=torch.bool, device=self.device
     )
+    self.ground_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+    self.ground_side = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+    self.sampled_ground_wrist_height = torch.zeros(self.num_envs, device=self.device)
+    self.sampled_other_wrist_raise = torch.zeros(self.num_envs, device=self.device)
     self.height_difficulty = torch.zeros(self.num_envs, device=self.device)
     self.sampled_shoulder_height = torch.zeros(
       self.num_envs, device=self.device
@@ -141,6 +150,9 @@ class BimanualWristCommand(CommandTerm):
                        "moving_shoulder_error_masked", "moving_command_xy_masked",
                        "moving_command_yaw_masked"):
           self.metrics[f"{mode}_{suffix}"] = torch.zeros(self.num_envs, device=self.device)
+    if cfg.ground_probability > 0:
+      for key in ("ground_fraction", "ground_wrist_error_masked", "ground_shoulder_error_masked", "ground_low_target_masked"):
+        self.metrics[key] = torch.zeros(self.num_envs,device=self.device)
 
   @property
   def robot_wrist_pos_w(self) -> torch.Tensor:
@@ -263,6 +275,11 @@ class BimanualWristCommand(CommandTerm):
       torch.rand(len(env_ids), device=self.device) < height_probability
     )
     self.height_active[env_ids] = height_active
+    if self.cfg.ground_probability > 0:
+      self.ground_active[env_ids] = height_active & (torch.rand(len(env_ids), device=self.device) < self.cfg.ground_probability)
+      self.ground_side[env_ids] = torch.randint(0,2,(len(env_ids),),device=self.device)
+      self.sampled_ground_wrist_height[env_ids] = torch.empty(len(env_ids),device=self.device).uniform_(*self.cfg.ground_wrist_height_range)
+      self.sampled_other_wrist_raise[env_ids] = torch.empty(len(env_ids),device=self.device).uniform_(*self.cfg.ground_other_wrist_raise_range)
     self.height_difficulty[env_ids] = curriculum
     self.sampled_shoulder_height[env_ids] = torch.empty(
       len(env_ids), device=self.device
@@ -275,6 +292,9 @@ class BimanualWristCommand(CommandTerm):
       height_extension = torch.empty(num_height, device=self.device)
       height_extension.uniform_(*self.cfg.low_reach_extension_range)
       offsets[height_active, :, 0] = height_extension[:, None] * curriculum
+      if self.cfg.height_spatial_sampling:
+        offsets[height_active, :, 0] = torch.empty(num_height,2,device=self.device).uniform_(*self.cfg.low_reach_extension_range) * curriculum
+        offsets[height_active, :, 1] = torch.empty(num_height,2,device=self.device).uniform_(*self.cfg.height_lateral_offset_range) * curriculum
     self.scenario[env_ids] = torch.maximum(
       self.scenario[env_ids], height_active.float()
     )
@@ -360,6 +380,25 @@ class BimanualWristCommand(CommandTerm):
         * (self.sampled_shoulder_height[pending] - shoulder_height),
         shoulder_height,
       )
+      if self.cfg.ground_probability > 0:
+        ground = pending[self.ground_active[pending]]
+        if len(ground):
+          # Derive shoulder height from the selected wrist's initial vertical
+          # gap, rather than sampling two independent absolute heights.
+          side = self.ground_side[ground]
+          rows = torch.arange(len(ground), device=self.device)
+          initial = self.start_pos_w[ground]
+          initial_height = initial[rows,side,2]
+          residual = self.sampled_wrist_height_offset[ground]
+          desired_shoulder = self.sampled_ground_wrist_height[ground] + self.start_shoulder_height[ground] - initial_height - residual
+          delta = self.height_difficulty[ground] * (desired_shoulder-self.start_shoulder_height[ground])
+          self.final_shoulder_height[ground] = self.start_shoulder_height[ground] + delta
+          self.final_pos_w[ground,:,2] = initial[:,:,2] + delta[:,None] + self.height_difficulty[ground,None]*residual[:,None]
+          # The other hand remains above the low hand, but is not forced to
+          # stay at its initial standing height (which can be unreachable).
+          other = 1-side
+          self.final_pos_w[ground,other,2] += self.height_difficulty[ground]*self.sampled_other_wrist_raise[ground]
+          self.is_asymmetric[ground] = True
       aa_w = quat_apply(root_quat, self.sampled_axis_angle_b[pending])
       angle = torch.linalg.norm(aa_w, dim=-1)
       axis = aa_w / angle[..., None].clamp_min(1.0e-6)
@@ -470,6 +509,7 @@ class BimanualWristCommand(CommandTerm):
       )
     self.scenario.fill_(scenario_code)
     self.height_active.zero_()
+    self.ground_active.zero_()
     self.height_difficulty.zero_()
     shoulder_height = self.shoulder_height
     self.start_shoulder_height.copy_(shoulder_height)
@@ -546,6 +586,12 @@ class BimanualWristCommand(CommandTerm):
     self.metrics["shoulder_height"] = self.shoulder_height
     self.metrics["target_shoulder_height"] = self.target_shoulder_height
     self.metrics["target_wrist_height"] = self.desired_wrist_pos_w[..., 2].mean(-1)
+    if self.cfg.ground_probability > 0:
+      mask = self.ground_active.float()
+      self.metrics["ground_fraction"] = mask
+      self.metrics["ground_wrist_error_masked"] = mean_pos_error*mask
+      self.metrics["ground_shoulder_error_masked"] = self.metrics["shoulder_height_error"]*mask
+      self.metrics["ground_low_target_masked"] = self.final_pos_w[...,2].min(-1).values*mask
     if self.cfg.clutch_enabled:
       twist = self._env.command_manager.get_term("twist")
       xy_error = torch.linalg.vector_norm(twist.command[:, :2] - self.robot.data.root_link_lin_vel_b[:, :2], dim=-1)
@@ -592,6 +638,12 @@ class BimanualWristCommandCfg(CommandTermCfg):
   vertical_offset_range: tuple[float, float] = (-0.06, 0.06)
   orientation_angle_range: tuple[float, float] = (-0.25, 0.25)
   height_probability: float = 0.0
+  height_spatial_sampling: bool = False
+  height_lateral_offset_range: tuple[float, float] = (-0.04, 0.04)
+  ground_probability: float = 0.0
+  """Fraction of height episodes assigned unilateral near-ground targets."""
+  ground_wrist_height_range: tuple[float, float] = (0.08, 0.18)
+  ground_other_wrist_raise_range: tuple[float, float] = (0.10, 0.20)
   clutch_enabled: bool = False
   shoulder_height_range: tuple[float, float] = (0.72, 1.02)
   wrist_height_offset_range: tuple[float, float] = (-0.02, 0.02)
