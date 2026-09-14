@@ -100,18 +100,28 @@ pip install -e .
 
 ### 本地查看推荐低位工作空间模型
 
-当前筛选推荐 `ground25`，seed1901，远端来源
-`2026-09-13_03-22-39/model_4999.pt`。多 seed 确认结果未定，不是最终最佳策略。
-它单独保存在 `models/best_ground/model.pt`（附来源记录），不替换移动模型。
+当前探索候选为 operation capability pack 的 balanced 模型
+（`2026-09-14_11-27-20/model_9998.pt`），保存在
+`models/best_ground/model.pt`（附来源记录）。下载默认覆盖旧本地候选，不备份；
+远端 checkpoint 保留。播放默认启用完整课程的连续 XYZ／朝向、肩高和离合移动。
 
 ```bash
 ./tools/remote_fetch_best_ground_model.sh
 ./tools/play_best_ground_model.sh --viewer native --wrist-mode ground
 ```
 
+使用训练混合分布：`./tools/play_best_ground_model.sh --viewer native`。
+强制双腕低位连续运动并运输：
+`./tools/play_best_ground_model.sh --viewer native --wrist-mode bilateral`。
+`balance` 表示无底盘移动指令，`adjust` 表示世界锚定腕部目标下的小范围移动。
+混合模式含静态保持；连续段为接近／抬起／放下，末段保持到回合结束，
+下个回合重新采样，不是无限循环轨迹。这是可视化，不是独立评测。
+
 `ground` 每回合采样低位任务，随机低手，目标腕高 0.16--0.28 m；
-`mixed` 恢复训练分布（50% 高度任务，其中25%低位），全程零底盘指令。
-这是允许自主调整支撑的静止操作策略，不要用运输配置评判它的行走能力。
+`mixed` 恢复 balanced 训练分布：25%运输、10%调整、65%自主平衡；
+50%高度任务，其中25%低位、低位任务中25%双腕低位；非静态任务中80%
+启用连续轨迹。允许机器人移动和自主调整支撑。低位范围是初始锚点范围，
+动态抬起段可高于该范围。
 可视化保留 play 模式的推力/负载，不等同于无扰动诊断。
 
 按照上述步骤完成后，您已经准备好在虚拟环境中运行相关程序。若遇到问题，请参考各组件的官方文档或检查依赖安装是否正确。

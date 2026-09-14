@@ -78,3 +78,18 @@ def apply_bilateral_transport_profile(env_cfg, mode="mixed"):
   twist.ranges.lin_vel_y = (-.09, .09)
   twist.ranges.ang_vel_z = (-.09, .09)
   print(f"[INFO] Bilateral transport replay: mode={mode}, transport/adjust={mixtures[mode]}")
+
+
+def apply_operation_capability_profile(env_cfg, mode="mixed"):
+  """Replay the balanced operation pack; conditional modes are diagnostic subsets."""
+  apply_bilateral_transport_profile(env_cfg, mode)
+  wrists = env_cfg.commands["wrists"]
+  wrists.capability_pack = True
+  wrists.continuous_probability = 1. if mode in ("ground", "bilateral") else .80
+  wrists.reach_probability = .5
+  wrists.asymmetric_probability = .5
+  wrists.shoulder_height_range = (.78, .98)
+  wrists.wrist_height_offset_range = (-.02, .02)
+  print("[INFO] Operation pack replay: asynchronous XYZ/quaternion approach/lift/place; "
+        f"mode={mode}, continuous probability={wrists.continuous_probability}; "
+        "full curriculum, visualization only (not held-out evaluation)")
