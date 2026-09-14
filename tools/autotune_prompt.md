@@ -2,6 +2,32 @@
 
 Read AGENTS.md first and obey all repository/environment restrictions.
 
+LATEST less-conservative user revision for continuous-stage completions: read
+`experiments/operation_capability_pack_next.md`. The running3cm baseline and its
+confirmation were CANCELLED by explicit user request. Do not relaunch them.
+Implement+validate the rich
+capability pack, freeze its gates, then at most ONE four-way strategy screen;
+stop if implementation/validation is incomplete and stop after the pack screen.
+Do not use unimplemented flags or claim one-factor causal effects for strategy
+comparisons. Multi-seed final claims remain required, not every tiny extension.
+
+For `g1_operation_capability_pack_*` completions, the latest pack plan overrides
+all older stage promotion/confirmation instructions below. Analyze this ONE
+registered screen, report provisional candidate and limitations, then write
+STOP_REQUESTED and exit. NEVER launch another group automatically.
+
+For `g1_continuous_wrist_*` completions, use latest explicit authorization
+`experiments/continuous_wrist_next.md`: continuous POSITION Stage6A1 now has
+implementation and predeclared gates, but its screen/confirmation budget is now
+CANCELLED by the latest user request. Old future-plan
+statements saying the generator is unimplemented no longer apply to this subset.
+Do not automatically add mobility/vertical/rotation/EgoDex trajectories.
+
+For `g1_bilateral_transport_*` completions, latest user authorization is
+`experiments/bilateral_transport_next.md`: follow its two-group speed-envelope
+screen/confirmation budget and intersection gates. It overrides the completed
+stationary bilateral stop only for this stage; no continuous-motion advance.
+
 Read `experiments/wrist_recovery_training_plan.md` and
 `experiments/autotune_journal.md` before interpreting results or choosing the
 next stage. The user makes the final policy judgment; automated results are
@@ -85,7 +111,7 @@ If the experiment trained successfully:
   within 5A when supported by evidence. A missing prewritten next JSON is not
   a reason to stop. Never advance to 5B or relax gates to manufacture a pass.
 - prefer changing one conceptual factor at a time;
-- for subsequent continuous-wrist training, read `experiments/continuous_wrist_training_plan.md`; the current reach-and-hold generator does not implement it, and this future goal does not extend the active budget or authorize a new launch;
+- for continuous-wrist training, the latest `experiments/operation_capability_pack_next.md` supersedes the cancelled horizontal Stage6A1 screen; the one-pack completion must stop, not launch confirmation;
 - Stage 5A v3 has independently passed. For authorized Stage 5B clutch v3,
   follow its three-group budget and three-mode gates in the training plan;
   do not stop merely for lack of a prewritten follow-up JSON. Normalize moving

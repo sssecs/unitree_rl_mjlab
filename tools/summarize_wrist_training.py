@@ -48,6 +48,23 @@ def conditional_metrics(means: dict[str, float]) -> dict[str, float | None]:
       key = prefix + "bilateral_ground_" + suffix + "_masked"
       if key in means:
         result["bilateral_ground_" + suffix] = means[key] / denominator if denominator > 0 else None
+  denominator = means.get(prefix + "bilateral_transport_moving_fraction", 0.)
+  for suffix in ("wrist_error", "shoulder_error", "command_xy", "projected_speed", "velocity_xy_error"):
+    key = prefix + "bilateral_transport_moving_" + suffix + "_masked"
+    if key in means:
+      result["bilateral_transport_moving_" + suffix] = means[key] / denominator if denominator > 0 else None
+  for suffix, fraction_key in (("wrist_error", "continuous_fraction"), ("rotation_error", "continuous_fraction"),
+                               ("command_speed", "continuous_moving_fraction"), ("projected_speed", "continuous_moving_fraction"),
+                               ("velocity_error", "continuous_moving_fraction")):
+    key = prefix + "continuous_" + suffix + "_masked"
+    fraction = means.get(prefix + fraction_key, 0.)
+    if key in means:
+      result["continuous_" + suffix] = means[key] / fraction if fraction > 0 else None
+  for suffix, fraction_key in (("shoulder_error", "continuous_fraction"), ("peak_wrist_error", "pack_case_fraction")):
+    key = prefix + "pack_" + suffix + "_masked"
+    fraction = means.get(prefix + fraction_key, 0.)
+    if key in means:
+      result["pack_" + suffix] = means[key]/fraction if fraction > 0 else None
   return result
 
 

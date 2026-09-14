@@ -1,0 +1,5 @@
+{
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "cmake.sourceDirectory": "/mnt/hdd/humanoid_locomotion/whole_body_policy/unitree_rl_mjlab/simulate"
+}

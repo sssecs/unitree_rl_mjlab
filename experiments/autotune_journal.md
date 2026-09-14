@@ -1611,3 +1611,270 @@
   not launch bilateral speed, continuous wrist motion, load balancing, reward,
   actuator, or domain-randomization changes. `.autotune/STOP_REQUESTED`
   records this required stop.
+
+### Authorized bilateral-low + shoulder-height + transport screen v1
+
+- User visually accepted the completed bilateral model and requested starting
+  the next combined mobility stage. New bounded budget is two groups: four-way
+  speed-envelope screen, then unchanged three-independent-seed confirmation
+  only if fixed gates pass. See `bilateral_transport_next.md`.
+- Preserve bilateral25/ground25/height50 sampling, shoulder coupling, additional
+  leg coefficient-1.75e-6, rewards, PPO and disturbances. Introduce fixed mode
+  mixture transport25%/bounded anchored-adjust10%/balance65%. All siblings
+  share this NEW mixture; zero-transport control is not the old stationary
+  distribution because it also retains shared adjustment commands.
+- Screen only transport envelope scale: longitudinal +/-0/.08/.12/.18m/s,
+  lateral/yaw numerical bounds half each. Existing curriculum ramps modes and
+  magnitudes. Fresh seed2101 per candidate, one H20,4096 global envs,5000
+  iterations;16384 concurrent. No continuous trajectories, filters, minimum
+  stride, load-balance rewards or human motion reference. Archived seed2003
+  stationary bilateral wrist/shoulder1.009/1.343cm is the visual baseline.
+- Add episode-accumulated intersection diagnostics for bilateral-low transport
+  AFTER reach-phase>=.99 with planar command>1e-3: worse-arm wrist error,
+  shoulder error, commanded speed, projected measured body speed and velocity
+  error. Reset per episode and normalize by actual intersection exposure.
+  Projected speed is not a verified world-reference body endpoint metric.
+- CPU sampling regressions and actual-AST telemetry test pass: phase/mode/low
+  intersection exclusions, worst-arm aggregation, conditional normalization,
+  and stopped-body projection. Reviewed git diff and synchronized. GPU smoke
+  uses256envs/20iterations,largest envelope, all-bilateral/ground/height/transport
+  with full curriculum; finite runtime and nonzero intersection required before
+  launching four full candidates. No automatic two-hour evaluator. Watcher will
+  analyze/email existing summaries, confirm on seeds2102/2103/2104 if passing,
+  otherwise stop; stop after confirmation and do not auto-launch continuous RL.
+- Smoke v1 exited0 with 20 finite samples/scalar, but post-reach intersection
+  fraction was0: random policies fell before the normal1s delay+2s reach
+  completed. This is missing coverage, not runtime success for the telemetry
+  branch. Smoke v2 changes ONLY validation reach timing to0/.10s to exercise
+  the branch before falls; full screen timing remains the original1/2s.
+- Smoke v2 exited0; all TensorBoard scalars finite; final10 intersection
+  fraction.83415, conditional planar command.10621m/s. Thus telemetry branch
+  exercised. Random-policy wrist/shoulder errors are not success evidence.
+  Formal launch uses unchanged original1/2s reach timing, not smoke shortening.
+- Full group `g1_bilateral_transport_screen_v1` registered all four detached
+  tmux siblings (control/speed08/speed12/speed18); each uses distinct GPU,
+  seed2101,4096globalenvs,5000iterations. GPU status confirms all four busy.
+  Event-driven watcher restarted, previous stationary stop archived. Initial
+  steady iteration times around2.6--2.7s; startup ETA is not yet stable.
+
+### Bilateral transport speed-envelope screen result and confirmation launch (`g1_bilateral_transport_screen_v1`)
+
+- Status: control, speed08, speed12, and speed18 all exited 0 after 5,000
+  iterations and retained `model_4999.pt`. Each inspected TensorBoard scalar
+  has 5,000 finite samples; all histories were finite. Preserved log tails end
+  at zero ETA without traceback, NaN/PPO divergence, configuration, CUDA/Warp,
+  or infrastructure errors. Remote status is idle after completion.
+- Command coverage and intersection gates use final-100 conditional values
+  from `summarize_wrist_training.py`, never raw masked numerators. The zero
+  envelope control correctly has no moving-transport intersection. For
+  speed08/speed12/speed18 respectively, bilateral-transport moving wrist and
+  shoulder errors are 0.980/1.941, 0.868/1.735, and 1.030/0.957 cm; conditional
+  planar commands are 0.0499/0.0671/0.1083 m/s; projected body speeds are
+  0.0443/0.0591/0.0888 m/s (88.7/88.0/82.0% of command); and planar velocity
+  errors are 0.0957/0.1026/0.1302 m/s. All positive siblings have nonzero
+  intersection exposure (speed08 final-100 fraction 0.573%) and pass the
+  >=0.1%, >=0.02m/s, <5cm wrist, <5cm shoulder, >=40%-projected-speed, and
+  <0.25m/s velocity-error gates. Individual bilateral low-target min/max means
+  are nonzero and in 0.16--0.28m: 0.1997/0.2410, 0.2000/0.2415, and
+  0.2016/0.2404m.
+- Retention: all screen candidates retain sub-2cm nonheight and balance wrist
+  errors, sub-4/5cm ground/height and adjust-moving wrist/shoulder errors,
+  nonzero adjustment moving exposure, >=590/600 episode length, and
+  <=0.01 backward-lean termination per logged batch. Relative to the new
+  same-seed control, nonheight wrist regression is at most 0.077cm (speed12),
+  well inside 0.3cm. Leg-RMS/action-acceleration, slip, contact, and shoulder
+  diagnostics show no gate failure; the motion-required acceleration is not
+  interpreted as shaking. These reset/episode statistics do not verify
+  world-reference endpoint displacement or replace held-out/visual evidence.
+- Decision: select speed18, the highest passing envelope whose 1.030-cm
+  intersection worse-arm wrist error lies within the fixed 0.5-cm band of the
+  best passing error (speed12, 0.868cm). This same-seed ranking is provisional,
+  not a final policy claim. The reviewed `bilateral_transport_confirm_v1.json`
+  preserves every selected common/per-run setting and uses fresh seeds
+  2102/2103/2104 on GPUs0/1/2, one H20 and 4,096 global environments per run
+  (12,288 concurrent), for 5,000 iterations without automatic held-out
+  evaluation. No further smoke is needed because source/configuration is
+  unchanged. Analyze all three confirmation siblings together and stop after
+  that group regardless of outcome; no continuous-motion stage is authorized.
+- Launch status: after JSON validation, `git diff --check`, reviewed diff,
+  synchronization, and an idle-GPU check, `tools/remote_sweep.py` registered
+  detached sessions `g1_bilateral_transport_confirm_v1_seed2102`, `_seed2103`,
+  and `_seed2104`. This completion-triggered turn intentionally performs no
+  polling or monitoring of the newly launched group.
+
+### Bilateral transport independent-seed confirmation result (`g1_bilateral_transport_confirm_v1`)
+
+- Hypothesis and exact change: this second and final transport group retained
+  the screen-selected speed18 envelope unchanged: transport probability 25%,
+  anchored-adjust probability 10%, and balance probability 65%, with
+  longitudinal/lateral/yaw ranges +/-0.18/+/-0.09/+/-0.09.  It preserved the
+  bilateral25/ground25/height50 sampling, shoulder coupling, 8x leg term,
+  PPO, disturbances, and all rewards.  Fresh seeds 2102/2103/2104 each used
+  one H20 and 4,096 global environments for 5,000 iterations (12,288
+  concurrently); no automatic held-out matrix was requested or run.
+- Status: the supplied exit code is 0 for every sibling; each completed 5,000
+  TensorBoard steps and retained `model_4999.pt`.  The preserved log tails end
+  at zero ETA with no traceback, NaN/PPO divergence, configuration, CUDA/Warp,
+  or infrastructure failure.  Remote status is idle after completion.  The
+  remote base Python lacks TensorBoard, so final-100 event files were read
+  locally with the installed TensorBoard reader; this is read-only extraction.
+- Final-100 bilateral-transport conditional diagnostics, ordered
+  2102/2103/2104: moving fractions are 0.535/0.570/0.517%; worse-arm wrist and
+  shoulder errors are 1.167/1.045/1.007 cm and 1.526/0.889/1.958 cm;
+  conditional planar commands are 0.106/0.103/0.103 m/s; projected speeds are
+  0.097/0.088/0.098 m/s (90.9/85.0/95.1% of command); and planar velocity
+  errors are 0.131/0.127/0.109 m/s.  Thus every seed passes the nonzero
+  exposure, >=0.02-m/s command, <5-cm wrist/shoulder, >=40%-projected-speed,
+  and <0.25-m/s error gates.  Projected speed remains a body-velocity
+  diagnostic, not verified world-reference endpoint displacement.
+- Retention: individual bilateral target min/max means are
+  0.199/0.240, 0.200/0.240, and 0.200/0.240 m, all nonzero and inside the
+  fixed 0.16--0.28-m interval.  Bilateral wrist/shoulder errors are
+  1.478/1.430, 1.168/1.001, and 1.019/1.783 cm; ground wrist/shoulder errors
+  are 0.916/1.130, 1.011/1.046, and 0.801/1.551 cm; height wrist/shoulder
+  errors are 0.686/0.774, 0.683/0.694, and 0.617/0.875 cm; and nonheight wrist
+  errors are 0.687/0.682/0.566 cm.  Balance wrist errors are
+  0.638/0.688/0.567 cm.  Adjust-moving fractions are nonzero
+  (1.664/1.663/1.635%) and wrist/shoulder errors are
+  0.562/1.530, 0.579/1.567, and 0.531/1.615 cm.  These are conditional
+  diagnostics normalized by actual fractions, never raw masked values.
+- Stability: final-100 episode lengths are 594.61/593.87/595.50 of 600;
+  backward-lean terminations are 0/0/0.00094 per logged batch; leg-acceleration
+  RMS snapshots are 79.72/80.78/76.19; and action acceleration is
+  1.004/0.998/0.975.  Log-tail slip/contact and shoulder diagnostics show no
+  identified gate failure.  These training snapshots are provisional and do
+  not replace visual inspection or the reserved fixed held-out matrix.
+- Decision: all three independent seeds pass the unchanged absolute gates.
+  This confirms the selected envelope only as provisional engineering
+  evidence; fresh confirmation seeds are unpaired with the seed2101 control.
+  The explicitly authorized two-group `bilateral_transport_*` budget is now
+  exhausted and the plan requires stopping after confirmation regardless of
+  outcome.  Preserve all checkpoints for the user's visual/manual held-out
+  review.  Do not launch continuous motion, a new speed factor, load-balance
+  objective, reward, actuator, or domain-randomization change.
+
+### Authorized next stage: continuous wrist position subset6A1
+
+- User requested next training; transport confirmation passed all three seeds.
+  Implement a bounded procedural horizontal position subset before6B mobility
+  recombination. Zero body commands isolate the new generator; this subset
+  does NOT establish locomotion retention, arbitrary6D or EgoDex generalization.
+- Add default-zero continuous probability; nonstatic episodes independently
+  sample nearby per-hand waypoint within original horizontal ranges and<=3cm
+  displacement. After original1/2s reach, quintic go/return cycles have
+  independent4--6s periods and C2 endpoint continuity; world wristz/shoulder
+  targets remain unchanged. Continuous-case initial reach becomes quintic;
+  orientation reaches its sampled goal then holds. Observations/rewards/PPO
+  unchanged; no future frames, human references, action filter or new reward.
+- CPU sampling/reset tests pass for bounded excursion, low-height invariance,
+  noncontiguous resets and disabled-mode reset. Existing intersection telemetry
+  regression also passes; analytical/numerical quintic derivative tests verify
+  zero endpoint velocity/acceleration and steady speed<=.028125m/s,
+  acceleration<=.045m/s^2. These bounds exclude initial reach.
+- New continuous statistics accumulate post-reach worst-arm pose errors and
+  moving commanded/measured wrist velocity projection per episode. They are
+  training means, not frame-pooled p95/lag/held-out proof. Gain requirement
+  prevents tiny3cm targets passing from stationary wrists alone.
+- New budget in `continuous_wrist_next.md`: screen continuous0/30/60/90%
+  conditional on nonstatic tasks, freshseed2201, oneGPU/4096globalenvs/5000
+  iterations each (16384concurrent); then unchanged seeds2202/2203/2204 only
+  if gates pass (12288concurrent). Preserve stationary bilateral/ground/height
+  distributions and8xleg. CPU/diff checked, source synced; GPU256env/20iter
+  all-continuous/bilateral/ground/height smoke required before full launch.
+  No automatic two-hour evaluator, no automatic6B advance; email existing
+  summaries and stop after confirmation or diagnosed failure.
+- GPU smoke v1 exited0 with finite metrics and39.5% continuous moving coverage.
+  Additional CPU curriculum tests caught inconsistent clipping during early
+  curriculum/inactive rows; corrected ranges to scale with curriculum and
+  applied explicit3cm norm cap plus inactive mask. All CPU checks now pass
+  acrosswarmup/ramp. Final local/remote commands.py SHA256 match:
+  `219f0da4437b89654b38e30694f9cf541153b0972d0688a885d576131926976d`.
+- Final-version GPU smoke v2,256envs/20iterations, exited0 with no nonfinite
+  TensorBoard scalars, continuous-moving fraction.38293 and conditional target
+  speed.00586m/s. Runtime validated; random-policy errors are not capability
+  success. Formal screen retains original1/2s reach, not validation0/.10s.
+- Formal group `g1_continuous_wrist_screen_v1` registered all four detached
+  remote tmux siblings: control/continuous30/continuous60/continuous90, GPUs0--3,
+  seed2201,4096globalenvs/run,5000iterations. Previous transport STOP archived
+  and event-driven watcher restored; initialization checks and initial PPO are
+  normal. Initial steady iteration times around2.7s; roughly4-hour screen ETA
+  is provisional until startup costs settle. No model aliases changed.
+
+### User revision: capability-pack exploration instead of tiny milestones
+
+- User requested less conservative training. Current continuous3cm four-way
+  screen remains running unchanged as a baseline; CANCEL its automatic
+  three-seed confirmation. Newest workflow overrides that narrow Group2 only,
+  without weakening its recorded gates or declaring a failed baseline passed.
+- Updated `operation_capability_pack_next.md`: after baseline analysis implement
+  and validate one shared XYZ/orientation/shoulder/clutch-mobility capability
+  distribution, then at most ONE four-way curriculum/mixing-strategy screen.
+  No reward/PPO/physics changes initially; no human references or future frames.
+  Prefer matched RL warm-start only after verifying runner/seed/budget semantics.
+- Rich strategy comparisons may change related distribution parameters together;
+  they are capability exploration, not causal claims per parameter. Reserve
+  multi-seed confirmation for a useful full capability pack after user review.
+  Missing implementation/validation requires a specific stop, not relabeling
+  the existing horizontal generator as a full capability pack. Stop after the
+  one pack screen, email existing summaries, no unbounded automatic stages.
+- Authorized status check confirms watcher running and only the original four
+  continuous screen sessions active; no narrow confirmation has launched.
+  Local prompt/plans are read afresh at the next completion; current runs and
+  checkpoints are not stopped or altered by this workflow-only revision.
+# 2026-09-14: user cancelled small continuous motion; operation pack
+
+Explicit user request: cancel continuous small actions and start next training.
+Graceful Ctrl-C sent to all four `g1_continuous_wrist_screen_v1` jobs; all H20s
+confirmed idle. Preserve remote checkpoints. Local handled/group marker prevents
+old completion launching duplicate screens/confirmations; no old seed confirmation.
+
+Hypothesis: a shared asynchronous XYZ/quaternion operation task distribution
+can be learned by pure-RL fine tuning of confirmed mobile seed2104, with coupled
+shoulder height and independent clutch transport. New procedural task clips are
+approach/lift/place, not joint trajectories or human priors. Position<=6cm XY,
+0--12cm lift, rotation<=20degrees times curriculum; final holds and static cases
+retained. Rewards, PPO and physics unchanged. Actor interface unchanged.
+CPU helper tests pass sampled bounds, asynchronous timing, endpoint quaternion
+continuity, translation speed/acceleration (.113m/s/.169m/s2 sampled maxima),
+angular derivative limits and independent reference rotation. Smooth shared
+shoulder lift is no greater than either wrist lift. This is not exhaustive IK
+or collision/ground-contact verification.
+
+GPU smoke `g1_operation_pack_validate_v1` completed exit0,256envs/20 NEW
+iterations,534actor/critic dimensions compatible. TensorBoard all histories
+finite, steps4999--5018 and saved model5018 confirm incremental resume semantics.
+Full difficulty bilateral-low+transport smoke exercised lift20.0% and place8.0%
+of episode time; continuous48.9%, nonzero commanded wrist speed. Episode length
+383.69 is an intentionally abrupt maximum-difficulty runtime smoke, not a learned
+quality pass; full run uses fresh gradual curricula. Do not reinterpret this
+smoke as object manipulation success or gate-qualified policy.
+
+Mixed-mode smoke `g1_operation_pack_validate_modes_v1` also completed exit0;
+all137 TensorBoard scalar histories finite. Balance/transport/adjust, lift/place
+and bilateral moving intersection all had nonzero exposure in their histories.
+Final lift/place fractions8.84%/8.86%; episode length449.86 at abrupt full
+difficulty again signals work remains, not a learned-policy acceptance pass.
+Both runtime validations pass; gradual full-screen launch now authorized once
+remote status confirms no overlapping jobs. Training disk has43TB free.
+
+Materialized `operation_capability_pack_screen_v1.json`: four independent H20
+runs,4096envs each/16384concurrent, seed2301, same confirmed checkpoint
+`2026-09-14_07-00-19/model_4999.pt`. Resume policy/optimizer and5000 NEW PPO
+iterations; fresh environment command curriculum, expected final iteration9998.
+Compare gentle/balanced/fast curriculum and low-workspace mixing strategies,
+not individual causal knob effects. Freeze provisional gates in pack plan.
+After this ONE screen watcher summarizes, emails existing text and stops;
+no automatic next group or multi-seed confirmation. All prior conclusions
+remain provisional without fixed evaluation/user visualization.
+
+Formal screen launched and registered successfully at11:27 server time:
+`g1_operation_capability_pack_screen_v1_{gentle,balanced,fast,low}` on GPU0--3.
+All four entered PPO; initial TensorBoard histories finite,4096envs per process
+confirmed from actual run metadata. Run directories respectively
+`2026-09-14_11-27-14`, `11-27-20`, `11-27-26`, `11-27-32` under
+`logs/rsl_rl/g1_wrist_recovery_teacher/` (same2026-09-14 date prefix).
+Early iteration counters4999--5005 confirm resume; do not compare early rewards
+as policy quality. Source/config/provenance archived per run; local journal
+handoff records do not alter running code. Watcher confirmed running in tmux;
+new group registered, cancelled small-motion group remains handled. Completion
+analysis must email existing summary and STOP after this one screen.

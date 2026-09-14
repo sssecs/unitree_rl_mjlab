@@ -27,6 +27,21 @@ and acceptance thresholds must not be tuned against individual checkpoints.
 
 ## Staged training curriculum
 
+LATEST workflow: `experiments/operation_capability_pack_next.md` authorizes a
+rich operation-pack implementation/validation and ONE four-way curriculum screen
+after the running continuous baseline, cancelling its automatic confirmation.
+Small capability increments no longer each require a multi-seed milestone;
+final policy claims still do. Below stage boundaries are pedagogical, not a
+requirement for independent full groups per axis.
+
+Latest continuous stage authorization: `experiments/continuous_wrist_next.md`
+defines implemented stationary horizontal position Stage6A1, its fixed telemetry
+gates and separate two-group budget after completed transport confirmation.
+
+Latest post-visual-review stage: `experiments/bilateral_transport_next.md`
+authorizes bilateral-low + shoulder-height + low-speed mobility under a new
+two-group budget. Previous stationary bilateral budget is complete, not reopened.
+
 Latest overnight authorization: `experiments/bilateral_ground_next.md` permits
 stationary bilateral-low + shoulder-height training after successful leg8x
 confirmation and bilateral smoke, without another user approval. Follow its
@@ -283,3 +298,10 @@ the immutable remote environment and copies the result directory back locally:
 ./tools/remote_evaluate_wrist.sh candidate_full5_nominal \
   /home/dev/unitree_rl_mjlab/logs/rsl_rl/g1_wrist_recovery_teacher/RUN/model_4999.pt
 ```
+# Latest active authorization (2026-09-14)
+
+Cancel the continuous3cm screen and confirmation; start the richer operation
+pack after CPU and GPU validation. See `operation_capability_pack_next.md` and
+`operation_capability_pack_screen_v1.json`. One four-GPU strategy screen only,
+then existing analysis/email and stop for visual review. This overrides older
+small-stage promotion instructions below; no new rewards or human references.

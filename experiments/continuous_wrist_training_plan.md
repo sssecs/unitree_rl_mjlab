@@ -1,5 +1,15 @@
 # Future goal: continuous wrist trajectories
 
+LATEST workflow revision: `operation_capability_pack_next.md` replaces serial
+tiny-axis milestones with one rich XYZ/orientation/height/clutch-mobility pack.
+Existing3cm screen stays as a baseline, but its auto-confirmation is cancelled.
+Implement/validate missing features before the one authorized pack screen.
+
+LATEST: horizontal continuous position subset Stage6A1 is implemented and
+user-authorized under `continuous_wrist_next.md`. Its two-group budget and gates
+override the older unimplemented/launch-blocked statement ONLY for this subset.
+The broader vertical/6D/mobility/generalization requirements below remain future.
+
 ## Scope and hypothesis
 
 The user requires wrists to keep moving along manipulation trajectories, rather

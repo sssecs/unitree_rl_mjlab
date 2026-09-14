@@ -37,6 +37,8 @@ def fixture(shoulder_range=(0.78, 0.98), step=90000):
     clutch_enabled=False,
     ground_probability=0., height_spatial_sampling=False,
     bilateral_ground_probability=0.,
+    continuous_probability=0., continuous_displacement=.03, continuous_period_range=(4.,6.),
+    capability_pack=False,
     ground_wrist_height_range=(.08,.18), ground_other_wrist_raise_range=(.10,.20),
     height_lateral_offset_range=(-.04,.04),
     curriculum_warmup_steps=30000, curriculum_ramp_steps=60000,
@@ -55,6 +57,11 @@ def fixture(shoulder_range=(0.78, 0.98), step=90000):
     setattr(x, name, torch.zeros(n, dtype=torch.bool))
   x.ground_active = torch.zeros(n,dtype=torch.bool)
   x.bilateral_ground_active = torch.zeros(n,dtype=torch.bool)
+  x.continuous_active = torch.zeros(n,dtype=torch.bool)
+  x.continuous_delta_w = torch.zeros(n,2,3)
+  x.continuous_period = torch.ones(n,2)
+  x.continuous_statistics = torch.zeros(n,8)
+  x.pack_statistics = torch.zeros(n,5)
   x.sampled_bilateral_ground_height = torch.zeros(n,2)
   x.ground_side = torch.zeros(n,dtype=torch.long)
   x.sampled_ground_wrist_height = torch.zeros(n)
@@ -114,6 +121,28 @@ def main():
   sample(x, ground_ids)
   assert not x.bilateral_ground_active.any()
   print('PASS bilateral low targets, shared shoulder coupling, asymmetry and reset isolation')
+  x = fixture()
+  x.cfg.continuous_probability = 1.
+  x.cfg.height_spatial_sampling = True
+  sample(x, ground_ids)
+  update(x)
+  assert x.continuous_active[ground_ids].all()
+  assert not x.continuous_active[1::2].any()
+  assert torch.linalg.vector_norm(x.continuous_delta_w, dim=-1).max() <= .030001
+  assert not x.continuous_delta_w[...,2].any()
+  assert torch.allclose(x.target_pos_w[ground_ids,:,2], x.final_pos_w[ground_ids,:,2])
+  assert (x.target_pos_w[ground_ids,:,:2]-x.final_pos_w[ground_ids,:,:2]).abs().max() <= .030001
+  x.cfg.continuous_probability = 0.
+  sample(x,ground_ids)
+  assert not x.continuous_active.any()
+  assert not x.continuous_statistics.any()
+  print('PASS bounded continuous horizontal motion, low-height preservation and reset isolation')
+  for step in (30000, 42000, 60000, 90000):
+    x=fixture(step=step)
+    x.cfg.continuous_probability=1.
+    sample(x,ground_ids)
+    assert torch.linalg.vector_norm(x.continuous_delta_w, dim=-1).max() <= .030001
+  print('PASS continuous bounds throughout curriculum warmup/ramp')
   torch.manual_seed(1701)
   ids = torch.arange(0, 1024, 2).flip(0)  # Noncontiguous, permuted reset subset.
   for bounds in ((0.78, 0.98), (0.62, 0.90)):

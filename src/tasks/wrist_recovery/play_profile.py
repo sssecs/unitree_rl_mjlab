@@ -62,3 +62,19 @@ def apply_bilateral_ground_workspace_profile(env_cfg, mode="mixed"):
     raise ValueError("Bilateral workspace supports mixed, ground or bilateral")
   apply_ground_workspace_profile(env_cfg, "mixed" if mode == "mixed" else "ground")
   env_cfg.commands["wrists"].bilateral_ground_probability = 1. if mode == "bilateral" else .25
+
+
+def apply_bilateral_transport_profile(env_cfg, mode="mixed"):
+  """Replay speed18, with bilateral mode forcing both-low transport."""
+  mixtures = {"mixed": (.25, .10), "transport": (1., 0.),
+              "adjust": (0., 1.), "balance": (0., 0.),
+              "ground": (.25, .10), "bilateral": (1., 0.)}
+  if mode not in mixtures:
+    raise ValueError(f"Unknown bilateral transport replay mode: {mode}")
+  apply_bilateral_ground_workspace_profile(env_cfg, mode if mode in ("ground", "bilateral") else "mixed")
+  twist = env_cfg.commands["twist"]
+  twist.transport_probability, twist.adjust_probability = mixtures[mode]
+  twist.ranges.lin_vel_x = (-.18, .18)
+  twist.ranges.lin_vel_y = (-.09, .09)
+  twist.ranges.ang_vel_z = (-.09, .09)
+  print(f"[INFO] Bilateral transport replay: mode={mode}, transport/adjust={mixtures[mode]}")
