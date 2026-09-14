@@ -149,6 +149,22 @@ Preserve checkpoints and best-model aliases; do not overwrite the current
 recommended mobile checkpoint with a stationary workspace model automatically.
 No automatic full evaluator. Send only the existing analysis summary by email.
 
+## Subsequent goal: continuous wrist motion
+
+Update after user visual review: intermittent leg shaking was observed. The user
+authorized the isolated leg-smoothness screen in `ground_leg_smooth_next.md` before
+changing the continuous command generator. Its separate two-group budget applies
+only to that screen/confirmation, not automatic Stage 6A launches.
+
+Follow `experiments/continuous_wrist_training_plan.md` after workspace confirmation
+and user review. The user wants wrists to move continuously, not merely reach one
+pose and hold it. Start with procedural smooth task-space trajectories, then
+continuous loco-manipulation, and finally mapped EgoDex/Pico clips. Retain static
+holds and deliberate pauses. Clutch OFF can track a moving world trajectory;
+clutch ON composes operation motion with the independent transport reference.
+This is a future training requirement, not an implemented command generator or
+an extension of the current two-group workspace budget.
+
 Workspace-only plan: `experiments/ground_workspace_screen_v1.json`.
 Four one-GPU runs, 4096 envs/run, 5000 iterations, seed 1901, conditional ground
 exposure 0/10/25/40%. All use zero base commands; this is NOT a locomotion

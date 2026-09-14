@@ -282,6 +282,16 @@ def unitree_g1_wrist_recovery_env_cfg(
       },
     ),
     "joint_acc": RewardTermCfg(func=mdp.joint_acc_l2, weight=-2.5e-7),
+    "leg_joint_acc": RewardTermCfg(
+      func=mdp.joint_acc_l2,
+      weight=0.0,
+      params={
+        "asset_cfg": SceneEntityCfg(
+          "robot",
+          joint_names=(r".*_hip_.*_joint", r".*_knee_joint", r".*_ankle_.*_joint"),
+        )
+      },
+    ),
     "joint_torque": RewardTermCfg(func=mdp.joint_torques_l2, weight=-1.0e-5),
     "joint_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-5.0),
     "action_rate": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.04),

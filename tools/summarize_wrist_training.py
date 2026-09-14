@@ -42,6 +42,12 @@ def conditional_metrics(means: dict[str, float]) -> dict[str, float | None]:
       key=prefix+"ground_"+suffix+"_masked"
       if key in means:
         result["ground_"+suffix]=means[key]/denominator if denominator>0 else None
+  if prefix + "bilateral_ground_fraction" in means:
+    denominator = means[prefix + "bilateral_ground_fraction"]
+    for suffix in ("wrist_error", "shoulder_error", "target_min", "target_max"):
+      key = prefix + "bilateral_ground_" + suffix + "_masked"
+      if key in means:
+        result["bilateral_ground_" + suffix] = means[key] / denominator if denominator > 0 else None
   return result
 
 
@@ -67,7 +73,7 @@ def main() -> None:
       values = events.Scalars(tag)
       if any(not math.isfinite(value.value) for value in values):
         nonfinite.append(tag)
-      if tag.startswith(("Metrics/wrists/", "Metrics/twist/", "Episode_Termination/")) or tag in (
+      if tag.startswith(("Metrics/wrists/", "Metrics/twist/", "Episode_Termination/", "Episode_Reward/")) or tag in (
         "Train/mean_episode_length", "Train/mean_reward", "Episode_Metrics/mean_action_acc"
       ):
         counts[tag] = len(values)

@@ -54,3 +54,11 @@ def apply_ground_workspace_profile(env_cfg, mode="mixed"):
   wrists.ground_wrist_height_range = (.16, .28)
   wrists.ground_other_wrist_raise_range = (.10, .20)
   print(f"[INFO] Ground workspace replay: {mode}; zero base command; wrist z=0.16..0.28m")
+
+
+def apply_bilateral_ground_workspace_profile(env_cfg, mode="mixed"):
+  """Replay bilateral25 mixture, or force its both-wrists-low subset."""
+  if mode not in ("mixed", "ground", "bilateral"):
+    raise ValueError("Bilateral workspace supports mixed, ground or bilateral")
+  apply_ground_workspace_profile(env_cfg, "mixed" if mode == "mixed" else "ground")
+  env_cfg.commands["wrists"].bilateral_ground_probability = 1. if mode == "bilateral" else .25

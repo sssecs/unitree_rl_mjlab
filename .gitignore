@@ -4,6 +4,7 @@ outputs
 logs
 models/best_wrist/
 models/best_ground/
+models/leg_smooth_8x/
 results/
 wandb
 .autotune/

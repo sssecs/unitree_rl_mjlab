@@ -27,6 +27,11 @@ and acceptance thresholds must not be tuned against individual checkpoints.
 
 ## Staged training curriculum
 
+Latest overnight authorization: `experiments/bilateral_ground_next.md` permits
+stationary bilateral-low + shoulder-height training after successful leg8x
+confirmation and bilateral smoke, without another user approval. Follow its
+two-group limit; it supersedes the old post-leg-confirmation stop, not its gates.
+
 | Stage | Training mixture and purpose | Promotion gate on held-out evaluation |
 |---|---|---|
 | 0. Static hold | Zero base command, world-fixed wrists; initially no push or payload. Establish quiet standing and remove meaningless wrist/body motion. | `static_hold`: no falls; success >= 95%; mean wrist position < 2 cm and rotation < 0.15 rad; low foot motion/contact switching. |
@@ -35,7 +40,9 @@ and acceptance thresholds must not be tuned against individual checkpoints.
 | 3. Proactive support | Add symmetric and asymmetric reaches with target known before motion. Mix 0.12--0.30 m extension, lateral/vertical offsets, and modest wrist rotation. | Both reach scenarios: success >= 85%; final position < 4 cm; stable support change occurs without waiting for a fall; static hold remains quiet. |
 | 4. Combined robustness | Mix reach, payload, and timed push, including asymmetric cases; retain easier cases to prevent forgetting. | `combined`: fall rate <= 10%, success >= 75%; robust-suite degradation is bounded; all earlier gates remain acceptable. |
 | 5. Locomotion and height | Add a masked shoulder-line height target, ground-reaching wrist targets, and then introduce base twist gradually. Permit forward waist flexion, knee flexion, or mixtures; prohibit using backward torso lean to lower the shoulders and penalize excessive shoulder height difference. | During automated exploration use wrist/height/velocity errors, falls, slip, backward lean, shoulder level, and action smoothness only as provisional diagnostics. The user performs final visual and held-out judgment. |
-| 6. EgoDex/Pico trajectories | Train on mapped continuous bimanual trajectories, with held-out objects/trajectory clips and latency/noise randomization. | Generalizes to unseen clips and asymmetric manipulation; simulator-to-real safety review precedes hardware execution. |
+| 6A. Continuous wrist motion | Procedural smooth bilateral pose trajectories, including asymmetric motion, deliberate pauses, ground approach/lift/place, and retained static holds. | Whole-trajectory precision, lag, peaks, stability, and static regression; see `experiments/continuous_wrist_training_plan.md`. |
+| 6B. Continuous loco-manipulation | Track continuous world trajectories with clutch OFF and relative operation trajectories composed with an independent transport reference with clutch ON. | Mode-conditioned tracking and body progress; preserve free support adjustment and target continuity. |
+| 6C. EgoDex/Pico trajectories | Train on mapped continuous bimanual trajectories, with held-out objects/trajectory clips and latency/noise randomization. | Generalizes to unseen clips and asymmetric manipulation; simulator-to-real safety review precedes hardware execution. |
 
 For automated promotion, “bounded” robust degradation means: static, payload,
 and push success each remain at least 85% with fall rate at most 10%; both reach
@@ -111,8 +118,11 @@ lean still exceeds twenty-five degrees; later stages may tighten this toward
 the deployment constraint. Excessive shoulder height difference uses a dead zone so
 lateral gait and push recovery remain possible. Start with stationary height
 control and low wrist targets, then introduce planar motion as a separate
-controlled factor. Stage 6 still requires the mapped trajectory split and
-interface contract.
+controlled factor. Stage 6A uses procedural task trajectories and does not require
+EgoDex data, but needs a continuous command generator and whole-path telemetry.
+Only Stage 6C requires the mapped trajectory split and interface contract. See
+`experiments/continuous_wrist_training_plan.md`; this future plan does not extend
+any current experiment budget or authorize an automatic launch.
 
 The first Stage 5A screen is rejected despite completing normally. Its absolute
 wrist-height and shoulder-height targets were sampled independently. The G1
@@ -253,8 +263,10 @@ if needed, and independent-seed confirmation). No unlimited loop. If the gate
 passes, confirm the unchanged winner on at least three independent seeds. If
 unmet, allow one evidence-based single-factor follow-up within budget; do not
 weaken gates. Stop after exhausted budget, diagnosed repeated crashes, absent
-safe next intervention, or after successful confirmation. Stage 6 remains blocked
-on mapped trajectory data/interface. Send existing group summaries by email.
+safe next intervention, or after successful confirmation. Stage 6C remains blocked
+on mapped trajectory data/interface; procedural Stage 6A first needs implementation,
+validation, and a separately approved bounded experiment budget. Send existing
+group summaries by email.
 
 Example:
 

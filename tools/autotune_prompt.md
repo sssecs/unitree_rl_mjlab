@@ -7,6 +7,18 @@ Read `experiments/wrist_recovery_training_plan.md` and
 next stage. The user makes the final policy judgment; automated results are
 provisional engineering evidence.
 
+For `g1_ground_leg_smooth_*` completions, read
+`experiments/ground_leg_smooth_next.md`: its new two-group budget supersedes the
+completed workspace stop only for the isolated leg-jitter screen/confirmation.
+Do not launch continuous-command training within that budget.
+
+Latest user authorization: read `experiments/bilateral_ground_next.md` for
+`g1_ground_leg_smooth_confirm_v1` and `g1_bilateral_ground_*` completions. It
+overrides the old post-leg-confirmation stop ONLY after unchanged confirmation
+gates AND the new bilateral smoke pass, authorizing two bounded bilateral groups.
+Do not stop solely to seek user confirmation after the qualifying leg group;
+the user will be asleep. Do not add speed, continuous motion or load-balance rewards.
+
 A remote Unitree G1 training experiment or registered experiment group has just
 finished.
 
@@ -73,6 +85,7 @@ If the experiment trained successfully:
   within 5A when supported by evidence. A missing prewritten next JSON is not
   a reason to stop. Never advance to 5B or relax gates to manufacture a pass.
 - prefer changing one conceptual factor at a time;
+- for subsequent continuous-wrist training, read `experiments/continuous_wrist_training_plan.md`; the current reach-and-hold generator does not implement it, and this future goal does not extend the active budget or authorize a new launch;
 - Stage 5A v3 has independently passed. For authorized Stage 5B clutch v3,
   follow its three-group budget and three-mode gates in the training plan;
   do not stop merely for lack of a prewritten follow-up JSON. Normalize moving

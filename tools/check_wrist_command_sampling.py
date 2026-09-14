@@ -36,6 +36,7 @@ def fixture(shoulder_range=(0.78, 0.98), step=90000):
   cfg = NS(
     clutch_enabled=False,
     ground_probability=0., height_spatial_sampling=False,
+    bilateral_ground_probability=0.,
     ground_wrist_height_range=(.08,.18), ground_other_wrist_raise_range=(.10,.20),
     height_lateral_offset_range=(-.04,.04),
     curriculum_warmup_steps=30000, curriculum_ramp_steps=60000,
@@ -53,6 +54,8 @@ def fixture(shoulder_range=(0.78, 0.98), step=90000):
   for name in ("height_active", "is_asymmetric", "needs_initialization"):
     setattr(x, name, torch.zeros(n, dtype=torch.bool))
   x.ground_active = torch.zeros(n,dtype=torch.bool)
+  x.bilateral_ground_active = torch.zeros(n,dtype=torch.bool)
+  x.sampled_bilateral_ground_height = torch.zeros(n,2)
   x.ground_side = torch.zeros(n,dtype=torch.long)
   x.sampled_ground_wrist_height = torch.zeros(n)
   x.sampled_other_wrist_raise = torch.zeros(n)
@@ -92,6 +95,25 @@ def main():
   assert x.sampled_offset_b[ground_ids,:,1].std()>.01
   assert torch.count_nonzero(x.ground_active[1::2])==0
   print('PASS unilateral ground heights, bilateral spatial coverage, and reset isolation')
+  x = fixture()
+  x.cfg.ground_probability = 1.
+  x.cfg.bilateral_ground_probability = 1.
+  x.cfg.ground_wrist_height_range = (.16, .28)
+  x.cfg.height_spatial_sampling = True
+  sample(x, ground_ids)
+  update(x)
+  targets = x.final_pos_w[ground_ids, :, 2]
+  assert torch.allclose(targets, x.sampled_bilateral_ground_height[ground_ids], atol=1e-6)
+  assert targets.min() >= .16 and targets.max() <= .28
+  assert (targets[:, 0]-targets[:, 1]).std() > .02
+  assert x.bilateral_ground_active[ground_ids].all()
+  assert not x.bilateral_ground_active[1::2].any()
+  gap = x.final_shoulder_height[ground_ids, None] - targets
+  assert gap.max() <= .348 + .02 + 1e-6
+  x.cfg.bilateral_ground_probability = 0.
+  sample(x, ground_ids)
+  assert not x.bilateral_ground_active.any()
+  print('PASS bilateral low targets, shared shoulder coupling, asymmetry and reset isolation')
   torch.manual_seed(1701)
   ids = torch.arange(0, 1024, 2).flip(0)  # Noncontiguous, permuted reset subset.
   for bounds in ((0.78, 0.98), (0.62, 0.90)):

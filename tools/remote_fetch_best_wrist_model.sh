@@ -30,12 +30,16 @@ if [ -f "$DESTINATION" ]; then
     exit 0
   fi
 
+  if [ "${G1_KEEP_MODEL_BACKUP:-1}" = "1" ]; then
   BACKUP="${DESTINATION}.bak.$(date +%Y%m%d_%H%M%S)"
   mv "$DESTINATION" "$BACKUP"
   if [ -f "${DESTINATION}.source.txt" ]; then
     mv "${DESTINATION}.source.txt" "${BACKUP}.source.txt"
   fi
   echo "Existing different checkpoint backed up to: $BACKUP"
+  else
+    echo "Replacing previous local checkpoint without backup: $DESTINATION"
+  fi
 fi
 
 mv "$TEMP_FILE" "$DESTINATION"

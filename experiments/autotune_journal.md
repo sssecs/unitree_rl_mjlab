@@ -1322,3 +1322,292 @@
   concurrent total), for 5,000 iterations. It contains no automatic held-out
   evaluator. The configuration is unchanged from the completed safe full run,
   so no additional runtime validation is required.
+
+### Near-ground workspace independent-seed confirmation result (`g1_ground_workspace_confirm_v1`)
+
+- Hypothesis and exact change: the second and final authorized workspace group
+  held the selected 25% conditional unilateral near-ground exposure unchanged:
+  stationary body commands; 50% height episodes; spatial height sampling;
+  shoulder range 0.78--0.98 m; low wrist target 0.16--0.28 m; other-wrist
+  raise 0.10--0.20 m; and low-reach extension 0.02--0.18 m. It trained fresh
+  policies with independent seeds 1902/1903/1904, each on one H20 with 4,096
+  environments globally, for 5,000 PPO iterations (12,288 concurrently). No
+  automatic held-out evaluation was requested or run.
+- Status: every sibling exited 0, reached iteration 4999, retained its
+  `model_4999.pt`, and supplied 5,000 finite TensorBoard samples for every
+  inspected scalar. The remote train-log tails have no traceback, NaN,
+  divergence, configuration, CUDA/Warp, or infrastructure error. Post-run
+  remote status reports no tmux session or GPU process.
+- Command validation and normalized final-100 results, ordered by seeds
+  1902/1903/1904: actual ground fractions are 0.12186/0.12194/0.12146, close
+  to the intended 12.5% overall exposure and nonzero in every seed. Actual
+  low-target means are 0.21977/0.21975/0.21988 m, all within the fixed
+  0.16--0.28 m range. Conditional ground wrist errors are
+  0.664/0.846/0.799 cm (mean 0.770, sample SD 0.095) and ground shoulder
+  errors are 1.067/0.814/0.669 cm (mean 0.850, SD 0.200). Conditional overall
+  height wrist/shoulder errors are 0.553/0.985, 0.681/0.677, and 0.636/0.594
+  cm; non-height wrist errors are 0.548/0.758/0.663 cm. These are conditional
+  normalized values, never raw `_masked` population numerators.
+- Retention and quality diagnostics: final-100 episode lengths are
+  597.04/593.77/594.91 of 600 (mean 595.24); backward-lean projections are
+  0.00216/0.00078/0.00092, with only 0/0.00031/0.00094 backward-lean
+  terminations per logged batch. Mean action accelerations are
+  0.972/1.041/1.023 and foot stagger is 0.149/0.388/0.405 m. The latter seed
+  variation is a training-quality observation, not a gate failure or a reason
+  to infer a final-policy ranking.
+- Gate and decision: each independent seed passes every fixed workspace
+  diagnostic: finite metrics, nonzero in-range ground targets, ground and
+  overall height wrist <4 cm, ground and overall height shoulder <5 cm,
+  non-height wrist <2 cm, episode length >=590, and no systematic backward
+  lean. This confirms the bounded stationary near-ground workspace result
+  across seeds; it is not full-trajectory, visual, or held-out evidence. The
+  workspace budget is exhausted (2/2), and the plan requires stopping for the
+  user's manual visual review and choice of deeper reach versus a motion
+  interface. Preserve all checkpoints and do not overwrite the mobile
+  checkpoint alias with a stationary workspace policy. For provisional
+  inspection only, seed1902's checkpoint
+  `/home/dev/unitree_rl_mjlab/logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-13_07-06-33/model_4999.pt`
+  has the best combined confirmation diagnostics; it is not promoted as a
+  final policy.
+
+### User visual review: isolated leg-smoothness screen v1
+
+- User observed intermittent high-frequency leg shaking and authorized the next
+  training. Hypothesis, not diagnosis: leg acceleration regularization may be
+  insufficient. Prioritize this single-factor screen before implementing the
+  continuous wrist trajectories documented in `continuous_wrist_training_plan.md`.
+- Add a default-zero twelve-leg-joint acceleration penalty; keep the original
+  whole-body -2.5e-7 term. Screen additional 0/-2.5e-7/-7.5e-7/-1.75e-6, hence
+  total leg strength 1x/2x/4x/8x. Arm penalty, PPO, physics, command distribution,
+  pushes and payloads stay unchanged. No filtering or human motion reference.
+- Add unweighted leg acceleration/velocity RMS command-reset snapshots. These
+  are provisional jitter proxies, not continuous or spectral measurements.
+  Summarizer now includes reward terms for unchanged-coefficient slip comparisons.
+- CPU wrist sampling/reset/normalization regressions passed; reviewed git diff
+  and synchronized. Remote `g1_ground_leg_smooth_smoke_v1`, GPU0, 256 envs,
+  20 iterations, strongest coefficient, exited0. TensorBoard has 20 finite
+  samples for new metrics/rewards and no nonfinite scalar. Observation shape
+  remains 534; twelve leg joints resolved. No height/ground samples during the
+  short normal curriculum warmup: this validates runtime, not low-task success.
+- New budget is two full groups: same-seed1902 four-way screen, then unchanged
+  three-seed1903/1904/1905 confirmation ONLY if fixed gates pass. Each full run
+  uses one H20, 4096 global envs, 5000 iterations, from scratch. See
+  `ground_leg_smooth_screen_v1.json` and `ground_leg_smooth_next.md`. Preserve
+  workspace gates, require >=20% lower leg RMS snapshot and bounded task
+  regression vs sibling control. Stop if no candidate passes; no automatic
+  Stage6A launch or two-hour evaluator. Reuse existing analysis emails.
+- Full group `g1_ground_leg_smooth_screen_v1` launched successfully on all four
+  GPUs through detached remote tmux; every sibling is advancing PPO with initial
+  iteration times 2.56--2.74 s (approximately four-hour ETA). Event-driven local
+  watcher restarted; previous workspace stop archived rather than discarded.
+
+### Isolated leg-smoothness screen v1 result and confirmation launch
+
+- Status: all fixed-seed-1902 screen siblings (`control`, `leg2x`, `leg4x`, and
+  `leg8x`) exited 0 after 5,000 iterations, retained `model_4999.pt`, and have
+  5,000 finite TensorBoard samples for every inspected scalar. Concise remote
+  train-log tails contain no traceback, error, or NaN; each ended with zero ETA.
+  Post-completion remote status shows no tmux session, GPU process, or resource
+  contention. This is normally completed training evidence, not a held-out or
+  continuous-frequency evaluation.
+- Final-100 command-reset diagnostics, ordered control/2x/4x/8x: unweighted
+  leg acceleration RMS snapshots are 104.349/92.263/88.234/72.542, corresponding
+  to reductions of 0.0/11.6/15.4/30.5% relative to control. Mean action
+  acceleration is 1.026/0.982/0.987/0.955, so no nonzero candidate increases it;
+  only 8x passes the fixed >=20% RMS gate. Velocity RMS snapshots are
+  1.812/1.619/1.584/1.312, contextual only and not a success criterion.
+- Workspace retention: all height/nonheight/ground conditional errors are
+  normalized by their actual fractions. For the promoted 8x sibling, height
+  wrist/shoulder errors are 0.667/0.731 cm, nonheight wrist error 0.642 cm, and
+  ground wrist/shoulder errors 0.887/0.983 cm, versus control ground wrist
+  0.889 cm and nonheight wrist 0.585 cm. Thus its ground error is unchanged and
+  its nonheight regression is 0.057 cm, within the fixed +0.5/+0.3-cm limits.
+  Its 595.64/600 mean episode length is only 0.54 below control and above 590;
+  ground target 0.2200 m and nonzero 12.8% overall ground exposure are in range.
+  Backward-lean termination is zero. Foot-slide contribution improves from
+  -0.01136 to -0.00604 under its unchanged coefficient; shoulder level and
+  contact behavior remain diagnostics, not optimization targets.
+- Decision: select 8x, the sole and therefore weakest passing nonzero
+  coefficient, provisionally. The reviewed `ground_leg_smooth_confirm_v1.json`
+  holds all task/PPO settings and the -1.75e-6 leg-only coefficient unchanged
+  and launches independent seeds 1903/1904/1905 on GPUs 0/1/2: 4,096
+  environments per one-GPU run (4,096 global each; 12,288 concurrent), 5,000
+  iterations, no automatic held-out evaluator. The prior 256-env smoke already
+  validated this exact coefficient, so no additional runtime validation is
+  required. This consumes group 2/2; stop for the user's visual review after
+  completion regardless of outcome, preserving every checkpoint.
+
+### Authorized overnight handoff: bilateral low wrists + shoulder height
+
+- User visually observed that the leg8x screen winner no longer shows obvious
+  high-frequency shaking. User subsequently identified the missing BOTH-low
+  wrist distribution and authorized implementing/training that stage, with
+  automatic handoff after current leg confirmation while the user sleeps.
+- Add default-zero conditional `bilateral_ground_probability` within ground
+  episodes. Independently sample both wrist heights at 0.16--0.28 m; derive
+  one shoulder target from both initial-gap-implied heights. Preserve existing
+  spatial ranges, curriculum, 8x leg penalty, PPO and disturbances. This is
+  stationary bilateral-low + height, NOT the speed/continuous combined stage.
+- CPU tests pass for both individual low heights, asymmetry, shared shoulder
+  coupling, noncontiguous reset isolation and return to unilateral mode.
+  Bilateral diagnostic normalizes worst-arm position error and target min/max
+  by actual bilateral fraction; reset snapshots are not whole-path guarantees.
+- `bilateral_ground_next.md` overrides the old post-leg-confirmation stop ONLY
+  if that confirmation passes its unchanged gates and bilateral GPU smoke
+  succeeds. New budget: one four-way seed2001 exposure screen (conditional
+  bilateral0/25/50/75% within ground), then unchanged seeds2002/2003/2004
+  confirmation only if passing. Each run4096 global envs/5000 iterations;
+  screening16384 concurrent and confirmation12288. Stop after new confirmation
+  or failure, preserve models, email existing summaries; no speed commands,
+  continuous generator, support-load reward or two-hour automatic evaluator.
+- Important monitoring correction: unprivileged `autotune_status.sh` cannot
+  access local tmux and falsely reported stopped. An authorized check confirms
+  watcher is RUNNING; no restart was needed. It will read updated local prompt
+  and plans on the next completion. GPU3 is used only for a 256-env/20-iteration
+  all-bilateral/all-height smoke while preceding three seeds keep training.
+- Bilateral smoke exited0 with 20 finite samples/new metric, bilateral fraction
+  1.0, normalized target minimum/maximum means0.19880/0.23960m. No nonfinite
+  TensorBoard scalars. Large random-policy errors are runtime validation only,
+  not success. Final worst-arm diagnostic replaces mean-arm aggregation for
+  the formal screen; rewards/observations are unchanged. Code/plans synced.
+
+### Isolated leg-smoothness independent-seed confirmation result (`g1_ground_leg_smooth_confirm_v1`)
+
+- Hypothesis and exact change: the second and final leg-jitter group kept the
+  screen-selected 8x total leg acceleration regularization unchanged
+  (additional twelve-leg-joint coefficient `-1.75e-6`, alongside the original
+  whole-body term). Stationary commands, the 25% conditional unilateral-ground
+  mixture, spatial sampling, rewards, PPO, pushes, and payloads were unchanged.
+  Fresh seeds 1903/1904/1905 each used one H20 and 4,096 global environments
+  for 5,000 iterations (12,288 concurrently); no automatic held-out evaluator
+  was requested or run.
+- Status: every sibling exited 0, reached iteration 4999, retained
+  `model_4999.pt`, and has 5,000 finite TensorBoard samples for every inspected
+  scalar. Remote log tails contain no traceback, NaN/divergence, configuration,
+  CUDA/Warp, or infrastructure error; remote status is idle after completion.
+- Final-100 normalized conditional diagnostics, ordered 1903/1904/1905:
+  height wrist/shoulder errors are 0.710/0.825, 0.742/0.783, and 0.738/0.711 cm;
+  nonheight wrist errors are 0.592/0.663/0.800 cm; ground wrist/shoulder errors
+  are 0.981/0.959, 1.096/0.913, and 0.995/0.841 cm. Actual ground fractions
+  are 12.72/12.14/12.77%, and actual low-target means are
+  0.2204/0.2210/0.2192 m, all nonzero and inside 0.16--0.28 m. These are
+  conditional metrics, never raw `_masked` population numerators.
+- Retention/smoothness: episode lengths are 594.54/595.75/594.31 (mean 594.87)
+  of 600; backward-lean terminations are 0/0.00156/0 per logged batch and
+  lean projections are 0.00107/0.00102/0.00088. Leg acceleration RMS snapshots
+  are 73.769/73.600/73.412 (mean 73.594), close to the screen's 8x value 72.542;
+  action acceleration is 0.957/0.953/0.962 and unchanged-weight foot-slide
+  contribution -0.00616/-0.00650/-0.00606. These reset snapshots support the
+  screen's smoothness diagnosis but are not spectral/visual evidence; unpaired
+  seeds cannot establish a new causal percentage reduction.
+- Gate and decision: all confirmation seeds pass the unchanged absolute
+  workspace gates (finite scalars, in-range nonzero targets, ground/height
+  wrist <4 cm, shoulder <5 cm, nonheight wrist <2 cm, episode length >=590,
+  and no systematic backward lean). Thus the bilateral handoff prerequisite is
+  satisfied, and the already-completed all-bilateral smoke also passed. Per
+  `bilateral_ground_next.md`, launch bounded bilateral screen group 1/2:
+  `g1_bilateral_ground_screen_v1`, a fixed-seed-2001 four-way 0/25/50/75%
+  conditional-bilateral exposure screen on GPUs 0--3 (4,096 global
+  environments per run; 16,384 concurrently). This remains stationary:
+  no speed/continuous commands, new reward, or load-balance objective, and no
+  automatic held-out matrix. It ranks candidates provisionally only.
+- Launch status: after reviewing `git diff --check` and synchronizing the
+  reviewed working tree, `tools/remote_sweep.py` registered all four detached
+  tmux siblings: `bilateral00`/`bilateral25`/`bilateral50`/`bilateral75`.
+  Each is seed 2001 on a distinct GPU with 4,096 global environments and 5,000
+  PPO iterations (16,384 concurrent); the factor is only 0/25/50/75%
+  bilateral probability conditional on ground episodes. No completion polling
+  is performed in this turn.
+
+### Bilateral-low stationary screen result and confirmation launch (`g1_bilateral_ground_screen_v1`)
+
+- Status: all four fixed-seed-2001 siblings exited 0, reached iteration 4999,
+  retained `model_4999.pt`, and supplied 5,000 finite TensorBoard samples for
+  every inspected scalar. Their remote log tails end at zero ETA without a
+  traceback, NaN, PPO divergence, configuration failure, or CUDA/Warp/
+  infrastructure error. Remote status after the group shows no tmux sessions
+  and no GPU processes. This is normal training evidence, not a held-out or
+  visual evaluation.
+- Command and task diagnostics: final-100 conditional results use actual
+  command fractions, never raw masked numerators. `bilateral00` is the control
+  and has no bilateral samples. For 25/50/75% conditional bilateral exposure,
+  actual overall bilateral fractions were 2.934/6.375/9.614%, respectively;
+  normalized individual low-target min/max means were 0.1997/0.2415,
+  0.2004/0.2402, and 0.1999/0.2393 m, all nonzero and in the fixed
+  0.16--0.28-m range. Worst-arm bilateral wrist/shoulder errors were
+  0.885/1.173, 1.852/1.753, and 1.034/1.431 cm. Thus every positive sibling
+  passes the bilateral <4-cm wrist and <5-cm shoulder gates.
+- Retention versus `bilateral00`: control height/nonheight wrist errors are
+  0.678/0.685 cm, height shoulder error 0.813 cm, episode length 594.47/600,
+  leg acceleration RMS 72.95, and backward-lean termination 0. The 25/50/75
+  siblings have height wrist/shoulder errors 0.677/0.893, 1.002/1.177, and
+  0.689/0.856 cm; nonheight wrist errors 0.596/0.734/0.663 cm; episode lengths
+  595.97/593.89/594.73; and leg RMS 73.06/76.53/73.83. All meet the fixed
+  overall-height, nonheight (+0.3 cm maximum), episode (-3 maximum), leg-RMS
+  (+20% maximum), finite, and backward-lean gates. Lean terminations are
+  0.00031/0/0 per logged batch; unchanged-weight foot-slide costs are
+  -0.00599/-0.00641/-0.00622 versus control -0.00640. These reset snapshots
+  are provisional training diagnostics, not a whole-path or held-out result.
+- Decision: select 25% conditional bilateral exposure. It is the lowest
+  positive passing setting and has the best bilateral wrist error; 75% is
+  within the allowed 0.5-cm wrist-error band but is not selected by the
+  predeclared lowest-positive rule. The screen ranks this setting only and
+  cannot establish a final policy claim.
+- Group 2/2 is the unchanged independent-seed confirmation in new reviewed
+  `experiments/bilateral_ground_confirm_v1.json`: seeds 2002/2003/2004 on
+  GPUs 0/1/2, each with 4,096 environments globally and 5,000 iterations
+  (12,288 concurrent), no automatic held-out evaluator. The already-completed
+  bilateral smoke validates this unchanged source/configuration, so no extra
+  smoke is required. Stop for the user's visual review after this confirmation
+  regardless of outcome; do not add speed, continuous motion, load-balance,
+  reward, actuator, or DR changes.
+- Launch status: after `git diff --check`, a clean idle-GPU check, and remote
+  synchronization, `tools/remote_sweep.py` registered detached tmux sessions
+  `g1_bilateral_ground_confirm_v1_seed2002`, `_seed2003`, and `_seed2004`.
+  No polling is performed in this completion-triggered turn.
+
+### Bilateral-low independent-seed confirmation result (`g1_bilateral_ground_confirm_v1`)
+
+- Hypothesis and exact change: the second and final bilateral group retained
+  the screen-selected 25% conditional bilateral-low probability unchanged
+  (with the 25% ground probability, about 3.1% overall at convergence). It
+  otherwise preserved the 8x leg-only acceleration coefficient `-1.75e-6`,
+  stationary zero-twist commands, height/reach mixture, spatial target
+  sampler, PPO, disturbances, and rewards. Fresh seeds 2002/2003/2004 used
+  one H20 and 4,096 global environments each for 5,000 iterations (12,288
+  concurrent); no automatic held-out matrix was requested or run.
+- Status: every sibling has exit code 0, completed iteration 4999, retained
+  `model_4999.pt`, and has 5,000 finite samples for every inspected
+  TensorBoard scalar. Log tails end at zero ETA with no traceback, NaN/PPO
+  divergence, code/configuration, CUDA/Warp, or infrastructure failure.
+  Remote status after completion shows no tmux session or GPU process.
+- Final-100 normalized conditional diagnostics, ordered 2002/2003/2004:
+  bilateral worst-arm wrist/shoulder errors are 1.407/0.864, 1.009/1.343, and
+  1.279/0.793 cm (means 1.232/1.000 cm). Bilateral target minimum/maximum
+  means are 0.1996/0.2384, 0.2010/0.2406, and 0.1990/0.2385 m: all are
+  nonzero and inside the fixed 0.16--0.28-m range. Ground wrist/shoulder
+  errors are 0.904/0.962, 0.840/1.253, and 1.193/0.963 cm; height
+  wrist/shoulder errors are 0.629/0.655, 0.631/0.731, and 0.781/0.826 cm;
+  nonheight wrist errors are 0.517/0.575/0.654 cm. These are conditional
+  reset-snapshot metrics normalized by actual fractions, not raw `_masked`
+  numerators and not held-out or whole-path evidence.
+- Retention and gates: the exported final-100 bilateral fractions are nonzero
+  for every seed (3.215% and 3.310% for seeds 2002/2003; seed 2004's target
+  diagnostics independently establish nonzero bilateral samples). Mean episode
+  lengths are 597.44/595.80/590.99,
+  all meeting the >=590 gate, with seed 2004 narrowly passing. Backward-lean
+  termination is zero for every seed. Leg acceleration RMS snapshots are
+  68.724/73.649/77.654 (mean 73.342), comparable with the archived leg8x
+  confirmation mean 73.594; action acceleration and unchanged-weight slip
+  show no diagnosed smoothness failure. Every seed therefore passes the fixed
+  absolute bilateral workspace gates. These unpaired snapshots do not prove a
+  causal smoothness improvement or substitute for user visual review.
+- Baseline comparison and decision: against the seed-2001 screen's 25%
+  sibling (0.885-cm bilateral wrist, 1.173-cm shoulder), confirmation remains
+  well below the 4/5-cm absolute limits but exhibits normal seed spread; it is
+  not a new final-policy claim. The two-group bilateral budget is exhausted
+  and `bilateral_ground_next.md` requires stopping after confirmation. Retain
+  all three checkpoints for the user's manual visual and held-out review; do
+  not launch bilateral speed, continuous wrist motion, load balancing, reward,
+  actuator, or domain-randomization changes. `.autotune/STOP_REQUESTED`
+  records this required stop.
