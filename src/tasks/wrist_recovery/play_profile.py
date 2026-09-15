@@ -93,3 +93,20 @@ def apply_operation_capability_profile(env_cfg, mode="mixed"):
   print("[INFO] Operation pack replay: asynchronous XYZ/quaternion approach/lift/place; "
         f"mode={mode}, continuous probability={wrists.continuous_probability}; "
         "full curriculum, visualization only (not held-out evaluation)")
+
+
+def apply_egodex_profile(env_cfg):
+  """Replay mapped EgoDex trajectories with no commanded base motion.
+
+  The command term preserves the training-time fixed shoulder-ground frame,
+  absolute hand orientation, 30 Hz interpolation, smooth initial reach, and
+  endpoint hold.  This is a visualization profile: it deliberately forces
+  EgoDex for every episode, whereas the pilot trained with a 25% mixture.
+  """
+  apply_operation_capability_profile(env_cfg, "balance")
+  wrists = env_cfg.commands["wrists"]
+  wrists.egodex_probability = 1.0
+  wrists.persistent_probability = 0.0
+  wrists.continuous_probability = 1.0
+  print("[INFO] EgoDex replay: mapped test-corpus wrist positions, orientations, "
+        "and shoulder height; zero commanded base velocity, native 30 Hz interpolation")

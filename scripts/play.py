@@ -35,7 +35,7 @@ class PlayConfig:
   no_terminations: bool = False
   wrist_profile: Literal["legacy", "stage5b-clutch", "ground-workspace", "bilateral-ground-workspace", "bilateral-transport", "operation-capability"] = "legacy"
   """Optional wrist task command profile; does not load arbitrary training YAML."""
-  wrist_mode: Literal["mixed", "transport", "adjust", "balance", "ground", "bilateral"] = "mixed"
+  wrist_mode: Literal["mixed", "transport", "adjust", "balance", "ground", "bilateral", "egodex"] = "mixed"
   """Choose a clutch episode type, or the training mixture."""
   """Disable all termination conditions (useful for viewing motions with dummy agents)."""
 
@@ -64,8 +64,14 @@ def run_play(task_id: str, cfg: PlayConfig):
     from src.tasks.wrist_recovery.play_profile import apply_bilateral_transport_profile
     apply_bilateral_transport_profile(env_cfg, cfg.wrist_mode)
   elif cfg.wrist_profile == "operation-capability":
-    from src.tasks.wrist_recovery.play_profile import apply_operation_capability_profile
-    apply_operation_capability_profile(env_cfg, cfg.wrist_mode)
+    from src.tasks.wrist_recovery.play_profile import (
+      apply_egodex_profile,
+      apply_operation_capability_profile,
+    )
+    if cfg.wrist_mode == "egodex":
+      apply_egodex_profile(env_cfg)
+    else:
+      apply_operation_capability_profile(env_cfg, cfg.wrist_mode)
   elif cfg.wrist_mode != "mixed":
     raise ValueError("--wrist-mode requires a non-legacy wrist profile")
 

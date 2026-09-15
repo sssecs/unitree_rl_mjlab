@@ -26,7 +26,7 @@ fi
 
 if [ -d "$STATE_DIR/pending" ]; then
     PENDING_COUNT="$(find "$STATE_DIR/pending" -maxdepth 1 -type f | wc -l)"
-    echo "Pending analyses: $PENDING_COUNT"
+    echo "Pending metric notifications: $PENDING_COUNT"
 fi
 
 if [ -d "$STATE_DIR/groups" ]; then

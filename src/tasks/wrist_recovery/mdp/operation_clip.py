@@ -5,7 +5,7 @@ from mjlab.utils.lab_api.math import quat_apply, quat_from_angle_axis, quat_mul,
 
 def sample_clip(offset_b, root_quat, goal_quat, height_active, difficulty, cfg):
   n = offset_b.shape[0]
-  delta = torch.zeros(n, 4, 2, 3, device=offset_b.device)
+  delta = torch.zeros(n, 4, 2, 3, device=offset_b.device, dtype=offset_b.dtype)
   for k in range(1, 4):
     candidate = offset_b[..., :2] + (torch.rand(n, 2, 2, device=offset_b.device)*2-1)*.06*difficulty[:, None, None]
     for mask, xr, yr in ((height_active, cfg.low_reach_extension_range, cfg.height_lateral_offset_range),
@@ -20,7 +20,7 @@ def sample_clip(offset_b, root_quat, goal_quat, height_active, difficulty, cfg):
   delta[..., 2] = 0
   delta[:, 1, :, 2] = torch.rand(n, 2, device=delta.device)*.04*difficulty[:, None]
   delta[:, 2, :, 2] = (.08+torch.rand(n, 2, device=delta.device)*.04)*difficulty[:, None]
-  axes = torch.randn(n, 4, 2, 3, device=delta.device)
+  axes = torch.randn(n, 4, 2, 3, device=delta.device, dtype=offset_b.dtype)
   axes /= torch.linalg.vector_norm(axes, dim=-1, keepdim=True).clamp_min(1e-6)
   angles = (torch.rand(n, 4, 2, device=delta.device)*2-1)*.35*difficulty[:, None, None]
   angles[:, 0] = 0
@@ -33,9 +33,27 @@ def sample_clip(offset_b, root_quat, goal_quat, height_active, difficulty, cfg):
   return delta, quats, durations
 
 
+def continue_clip(delta, quats, durations, done, offset_b, root_quat, goal_quat,
+                  height_active, difficulty, cfg):
+  """Replace only completed hands, retaining endpoint pose and zero velocity."""
+  new_delta, new_quats, new_duration = sample_clip(offset_b, root_quat, goal_quat, height_active, difficulty, cfg)
+  new_delta[:, 0] = delta[:, -1]
+  new_quats[:, 0] = quats[:, -1]
+  pause = torch.rand_like(difficulty[:, None].expand(-1, 2)) < .20
+  new_delta[:, 1] = torch.where(pause[..., None], new_delta[:, 0], new_delta[:, 1])
+  new_quats[:, 1] = torch.where(pause[..., None], new_quats[:, 0], new_quats[:, 1])
+  distance = torch.linalg.vector_norm(new_delta[:, 1:]-new_delta[:, :-1], dim=-1)
+  angle = quat_error_magnitude(new_quats[:, 1:], new_quats[:, :-1])
+  for bound in (2*distance/.12, torch.sqrt(6*distance/.30), 2*angle/.60, torch.sqrt(9*angle/1.50)):
+    new_duration = torch.maximum(new_duration, bound)
+  delta.copy_(torch.where(done[:, None, :, None], new_delta, delta))
+  quats.copy_(torch.where(done[:, None, :, None], new_quats, quats))
+  durations.copy_(torch.where(done[:, None, :], new_duration, durations))
+
+
 def evaluate_clip(delta, quats, durations, age):
   # Independent hand timing; clamp at the last pose rather than wrap/repeat.
-  elapsed = age[:, None]
+  elapsed = age[:, None] if age.ndim == 1 else age
   ends = durations.cumsum(1)
   segment = (elapsed[:, None, :] >= ends[:, :2]).sum(1).clamp(max=2)
   rows = torch.arange(len(age), device=age.device)[:, None]

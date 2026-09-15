@@ -39,6 +39,7 @@ def fixture(shoulder_range=(0.78, 0.98), step=90000):
     bilateral_ground_probability=0.,
     continuous_probability=0., continuous_displacement=.03, continuous_period_range=(4.,6.),
     capability_pack=False,
+    diagnostics_enabled=False, persistent_probability=0.,
     ground_wrist_height_range=(.08,.18), ground_other_wrist_raise_range=(.10,.20),
     height_lateral_offset_range=(-.04,.04),
     curriculum_warmup_steps=30000, curriculum_ramp_steps=60000,
@@ -62,6 +63,10 @@ def fixture(shoulder_range=(0.78, 0.98), step=90000):
   x.continuous_period = torch.ones(n,2)
   x.continuous_statistics = torch.zeros(n,8)
   x.pack_statistics = torch.zeros(n,5)
+  x.pack_start_time = torch.zeros(n,2)
+  x.pack_continuations = torch.zeros(n,2)
+  x.persistent_statistics = torch.zeros(n,4)
+  x.persistent_active = torch.zeros(n,dtype=torch.bool)
   x.sampled_bilateral_ground_height = torch.zeros(n,2)
   x.ground_side = torch.zeros(n,dtype=torch.long)
   x.sampled_ground_wrist_height = torch.zeros(n)

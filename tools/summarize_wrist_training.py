@@ -4,6 +4,7 @@
 import argparse
 import json
 import math
+import re
 import statistics
 from pathlib import Path
 
@@ -65,6 +66,23 @@ def conditional_metrics(means: dict[str, float]) -> dict[str, float | None]:
     fraction = means.get(prefix + fraction_key, 0.)
     if key in means:
       result["pack_" + suffix] = means[key]/fraction if fraction > 0 else None
+  for suffix, fraction_key in (("contact_wrist_error", "contact_fraction"),
+                               ("fd_velocity_error", "moving_fraction"),
+                               ("reported_velocity_error", "moving_fraction"),
+                               ("recovery_time", "recoveries_masked")):
+    key=prefix+"diag_"+suffix+"_masked"
+    fraction=means.get(prefix+"diag_"+fraction_key,0.)
+    if key in means:
+      result["diag_"+suffix]=means[key]/fraction if fraction>0 else None
+  key=prefix+"persistent_continuations_masked"
+  if key in means:
+    fraction=means.get(prefix+"persistent_fraction",0.)
+    result['persistent_continuations']=means[key]/fraction if fraction>0 else None
+  for suffix in ('wrist_error','rotation_error','shoulder_error'):
+    key=prefix+'persistent_'+suffix+'_masked'
+    if key in means:
+      fraction=means.get(prefix+'persistent_steady_fraction',0.)
+      result['persistent_'+suffix]=means[key]/fraction if fraction>0 else None
   return result
 
 
@@ -96,8 +114,15 @@ def main() -> None:
         counts[tag] = len(values)
         if values:
           means[tag] = statistics.fmean(value.value for value in values[-args.window:])
+    checkpoints = []
+    for path in Path(metadata["log_dir"]).glob("model_*.pt"):
+      match = re.fullmatch(r"model_(\d+)\.pt", path.name)
+      if match:
+        checkpoints.append((int(match.group(1)), path.name))
     print(json.dumps({
       "session": session,
+      "log_dir": metadata["log_dir"],
+      "latest_checkpoint": max(checkpoints, default=(None, None))[1],
       "window": args.window,
       "metric_scope": "command reset snapshots; training diagnostics, not held-out evaluation",
       "conditional": conditional_metrics(means),

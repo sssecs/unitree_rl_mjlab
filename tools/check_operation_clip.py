@@ -51,3 +51,19 @@ original = module['evaluate_clip'](delta,quats,duration,torch.full((n,),4.))
 assert torch.allclose(rotated[0],quat_apply(rotation[:,0],original[0]),atol=1e-8)
 assert quat_error_magnitude(rotated[1],quat_mul(rotation[:,0],original[1])).max()<1e-5
 print('PASS XYZ bounds, asynchronous segments, quaternion/end continuity, shoulder feasibility and translation derivatives',float(torch.linalg.vector_norm(v,dim=-1).max()),float(torch.linalg.vector_norm(a,dim=-1).max()))
+
+# Successor endpoints and non-completed hand must not jump or be overwritten.
+done=torch.zeros(n,2,dtype=torch.bool); done[:,0]=True
+old_delta,old_quats,old_duration=delta.clone(),quats.clone(),duration.clone()
+module['continue_clip'](delta,quats,duration,done,offset.double(),root.double(),goal.double(),torch.ones(n,dtype=torch.bool),torch.ones(n,dtype=torch.float64),cfg)
+assert torch.allclose(delta[:,0,0],old_delta[:,-1,0])
+assert torch.allclose(quats[:,0,0],old_quats[:,-1,0])
+assert torch.equal(delta[:,:,1],old_delta[:,:,1]) and torch.equal(quats[:,:,1],old_quats[:,:,1])
+assert torch.equal(duration[:,:,1],old_duration[:,:,1])
+start=module['evaluate_clip'](delta,quats,duration,torch.zeros(n,2))
+assert torch.allclose(start[0][:,0],old_delta[:,-1,0])
+after=module['evaluate_clip'](delta,quats,duration,torch.full((n,2),.0001))
+assert torch.linalg.vector_norm((after[0][:,0]-start[0][:,0])/.0001,dim=-1).max()<1e-5
+assert torch.linalg.vector_norm(delta[...,:2],dim=-1).max()<=.060001
+assert delta[...,2].min()>=0 and delta[...,2].max()<=.120001
+print('PASS successor continuity, zero boundary velocity, independent hand replacement and retained workspace')

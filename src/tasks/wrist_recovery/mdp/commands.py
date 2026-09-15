@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
 import torch
 
 from mjlab.entity import Entity
@@ -10,6 +12,7 @@ from mjlab.managers.command_manager import CommandTerm, CommandTermCfg
 from mjlab.utils.lab_api.math import (
   axis_angle_from_quat,
   matrix_from_quat,
+  quat_from_matrix,
   quat_apply,
   quat_apply_inverse,
   quat_error_magnitude,
@@ -30,6 +33,10 @@ class BimanualWristCommand(CommandTerm):
 
   def __init__(self, cfg: BimanualWristCommandCfg, env: ManagerBasedRlEnv):
     super().__init__(cfg, env)
+    if not 0 <= cfg.persistent_probability <= 1 or (cfg.persistent_probability > 0 and not cfg.capability_pack):
+      raise ValueError("Persistent trajectories require capability_pack and probability in [0,1]")
+    if not 0 < cfg.diagnostics_trace_window_steps <= cfg.diagnostics_trace_period_steps:
+      raise ValueError("Diagnostic trace window must be positive and no larger than its period")
     if not 0.0 <= cfg.reach_probability <= 1.0:
       raise ValueError("reach_probability must be in [0, 1].")
     if not 0.0 <= cfg.asymmetric_probability <= 1.0:
@@ -108,6 +115,36 @@ class BimanualWristCommand(CommandTerm):
     self.pack_duration = torch.ones(self.num_envs, 3, 2, device=self.device)
     self.pack_stage = torch.zeros(self.num_envs, 2, dtype=torch.long, device=self.device)
     self.pack_statistics = torch.zeros(self.num_envs, 5, device=self.device)
+    self.persistent_active = torch.zeros_like(self.continuous_active)
+    self.egodex_active = torch.zeros_like(self.continuous_active)
+    self.pack_start_time = torch.zeros(self.num_envs, 2, device=self.device)
+    self.pack_continuations = torch.zeros_like(self.pack_start_time)
+    self.persistent_statistics = torch.zeros(self.num_envs, 4, device=self.device)
+    self.pack_reference_quat = torch.zeros(self.num_envs, 4, device=self.device)
+    self.pack_reference_quat[:, 0] = 1
+    self.egodex_positions = None
+    if cfg.egodex_probability > 0:
+      corpus_path = Path(cfg.egodex_data_path)
+      if not corpus_path.is_absolute(): corpus_path = Path(__file__).resolve().parents[4] / corpus_path
+      with np.load(corpus_path, allow_pickle=False) as corpus:
+        positions, orientations = corpus["positions"], corpus["orientations"]
+        offsets, lengths = corpus["offsets"], corpus["lengths"]
+      if positions.ndim != 3 or positions.shape[1:] != (3, 3) or len(offsets) != len(lengths)+1:
+        raise ValueError(f"Invalid EgoDex corpus: {corpus_path}")
+      if orientations.shape != (len(positions), 2, 4) or not np.isfinite(orientations).all():
+        raise ValueError(f"Invalid EgoDex wrist orientations: {corpus_path}")
+      self.egodex_positions = torch.as_tensor(positions, device=self.device)
+      self.egodex_orientations = torch.as_tensor(orientations, device=self.device)
+      self.egodex_offsets = torch.as_tensor(offsets[:-1], device=self.device)
+      self.egodex_lengths = torch.as_tensor(lengths, device=self.device)
+      self.egodex_clip = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+      self.egodex_start = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+      self.egodex_origin_w = torch.zeros(self.num_envs, 3, device=self.device)
+      self.egodex_forward_w = torch.zeros(self.num_envs, 3, device=self.device); self.egodex_forward_w[:, 0] = 1
+      self.egodex_right_w = torch.zeros(self.num_envs, 3, device=self.device); self.egodex_right_w[:, 1] = -1
+    if cfg.diagnostics_enabled:
+      from .operation_diagnostics import OperationDiagnostics
+      self.operation_diagnostics = OperationDiagnostics(self)
     self.sampled_bilateral_ground_height = torch.zeros(self.num_envs, 2, device=self.device)
     self.ground_side = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     self.sampled_ground_wrist_height = torch.zeros(self.num_envs, device=self.device)
@@ -188,6 +225,10 @@ class BimanualWristCommand(CommandTerm):
     if cfg.capability_pack:
       for key in ("pack_shoulder_error_masked", "pack_case_fraction", "pack_peak_wrist_error_masked", "pack_lift_fraction", "pack_place_fraction"):
         self.metrics[key] = torch.zeros(self.num_envs, device=self.device)
+      for key in ("persistent_fraction", "persistent_continuations_masked"):
+        self.metrics[key] = torch.zeros(self.num_envs, device=self.device)
+      for key in ("steady_fraction", "wrist_error_masked", "rotation_error_masked", "shoulder_error_masked"):
+        self.metrics['persistent_'+key] = torch.zeros(self.num_envs, device=self.device)
     if cfg.continuous_probability > 0:
       for key in ("continuous_fraction", "continuous_wrist_error_masked", "continuous_rotation_error_masked",
                   "continuous_moving_fraction", "continuous_command_speed_masked",
@@ -287,6 +328,28 @@ class BimanualWristCommand(CommandTerm):
       command = torch.cat((command, (twist.mode == 1).float()[:, None]), dim=-1)
     return command
 
+  def _egodex_targets(self, env_ids: torch.Tensor, age_s: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Interpolate mapped [left hand, right hand, shoulder midpoint] samples."""
+    frame = self.egodex_start[env_ids].float() + age_s * self.cfg.egodex_source_fps
+    length = self.egodex_lengths[self.egodex_clip[env_ids]]
+    i0 = frame.floor().long().clamp_min(0).minimum(length - 1)
+    i1 = (i0 + 1).minimum(length - 1)
+    alpha = (frame - i0.float()).clamp(0, 1)
+    base = self.egodex_offsets[self.egodex_clip[env_ids]]
+    local = self.egodex_positions[base + i0] * (1-alpha[:, None, None]) + self.egodex_positions[base + i1] * alpha[:, None, None]
+    q0, q1 = self.egodex_orientations[base + i0], self.egodex_orientations[base + i1]
+    q1 = torch.where((q0*q1).sum(-1, keepdim=True) < 0, -q1, q1)
+    local_quat = q0 * (1-alpha[:, None, None]) + q1 * alpha[:, None, None]
+    local_quat /= torch.linalg.vector_norm(local_quat, dim=-1, keepdim=True).clamp_min(1e-6)
+    world = (self.egodex_origin_w[env_ids, None, :]
+             + local[..., 0, None] * self.egodex_forward_w[env_ids, None, :]
+             + local[..., 1, None] * self.egodex_right_w[env_ids, None, :])
+    world[..., 2] += local[..., 2]
+    frame_rotation = torch.stack((self.egodex_forward_w[env_ids], self.egodex_right_w[env_ids],
+                                  torch.tensor((0., 0., 1.), device=self.device).expand(len(env_ids), -1)), dim=-1)
+    source_quat = quat_from_matrix(frame_rotation[:, None] @ matrix_from_quat(local_quat))
+    return world[:, :2], world[:, 2, 2], source_quat
+
   def _resample_command(self, env_ids: torch.Tensor) -> None:
     if self.scripted:
       return
@@ -373,11 +436,22 @@ class BimanualWristCommand(CommandTerm):
     self.continuous_active[env_ids] = False
     self.continuous_statistics[env_ids] = 0
     self.pack_statistics[env_ids] = 0
+    self.pack_start_time[env_ids] = 0
+    self.pack_continuations[env_ids] = 0
+    self.persistent_statistics[env_ids] = 0
+    self.persistent_active[env_ids] = False
+    self.egodex_active[env_ids] = False
+    if self.cfg.diagnostics_enabled:
+      self.operation_diagnostics.reset(env_ids)
     self.continuous_delta_w[env_ids] = 0
     if self.cfg.continuous_probability > 0:
       self.continuous_active[env_ids] = (self.scenario[env_ids] > 0) & (
         torch.rand(len(env_ids), device=self.device) < self.cfg.continuous_probability
       )
+      if self.cfg.capability_pack:
+        self.persistent_active[env_ids] = self.continuous_active[env_ids] & (
+          torch.rand(len(env_ids), device=self.device) < self.cfg.persistent_probability
+        )
       self.continuous_period[env_ids] = torch.empty(len(env_ids), 2, device=self.device).uniform_(*self.cfg.continuous_period_range)
       delta = torch.randn(len(env_ids), 2, 2, device=self.device)
       delta = delta / torch.linalg.vector_norm(delta, dim=-1, keepdim=True).clamp_min(1e-6) * self.cfg.continuous_displacement
@@ -399,6 +473,21 @@ class BimanualWristCommand(CommandTerm):
     self.elapsed[env_ids] = 0.0
     self.phase[env_ids] = 0.0
     self.target_lin_vel_w[env_ids] = 0.0
+    if self.egodex_positions is not None:
+      ego = torch.rand(len(env_ids), device=self.device) < self.cfg.egodex_probability
+      ego_ids = env_ids[ego]
+      if len(ego_ids):
+        self.egodex_active[ego_ids] = True
+        self.egodex_clip[ego_ids] = torch.randint(len(self.egodex_lengths), (len(ego_ids),), device=self.device)
+        lengths = self.egodex_lengths[self.egodex_clip[ego_ids]]
+        # Random subclips retain native source speed; clamp at endpoint rather than wrap.
+        self.egodex_start[ego_ids] = (torch.rand(len(ego_ids), device=self.device) * lengths.float()).long()
+        self.scenario[ego_ids] = 1
+        self.height_active[ego_ids] = True
+        self.ground_active[ego_ids] = False
+        self.bilateral_ground_active[ego_ids] = False
+        self.continuous_active[ego_ids] = True
+        self.persistent_active[ego_ids] = False
     self.needs_initialization[env_ids] = True
 
   def _update_command(self) -> None:
@@ -452,6 +541,26 @@ class BimanualWristCommand(CommandTerm):
         * (self.sampled_shoulder_height[pending] - shoulder_height),
         shoulder_height,
       )
+      ego_ids = pending[self.egodex_active[pending]]
+      if len(ego_ids):
+        shoulder_xy = self.robot.data.body_link_pos_w[ego_ids][:, self.shoulder_body_ids, :2].mean(1)
+        self.egodex_origin_w[ego_ids] = 0
+        self.egodex_origin_w[ego_ids, :2] = shoulder_xy
+        local_forward = torch.zeros(len(ego_ids), 3, device=self.device)
+        local_forward[:, 0] = 1
+        forward = quat_apply(self.robot.data.root_link_quat_w[ego_ids], local_forward)
+        forward[:, 2] = 0
+        forward /= torch.linalg.vector_norm(forward, dim=-1, keepdim=True).clamp_min(1e-6)
+        self.egodex_forward_w[ego_ids] = forward
+        self.egodex_right_w[ego_ids] = torch.stack((forward[:, 1], -forward[:, 0], torch.zeros_like(forward[:, 0])), -1)
+        ego_pos, ego_shoulder, ego_quat = self._egodex_targets(ego_ids, torch.zeros(len(ego_ids), device=self.device))
+        self.final_pos_w[ego_ids] = ego_pos
+        self.final_shoulder_height[ego_ids] = ego_shoulder
+        # Unlike the earlier relative-orientation prototype, this is an
+        # absolute target in the fixed shoulder-ground frame.  The initial
+        # reach interpolates from the actual wrist pose to the first command;
+        # subsequent clip samples are never reset or re-aligned to the robot.
+        self.final_quat_w[ego_ids] = ego_quat
       if self.cfg.ground_probability > 0:
         ground = pending[self.ground_active[pending]]
         if len(ground):
@@ -494,6 +603,7 @@ class BimanualWristCommand(CommandTerm):
       self.elapsed[pending] = 0.0
       if self.cfg.capability_pack:
         from .operation_clip import sample_clip
+        self.pack_reference_quat[pending] = self.robot.data.root_link_quat_w[pending]
         self.pack_delta[pending], self.pack_quat[pending], self.pack_duration[pending] = sample_clip(
           self.sampled_offset_b[pending], self.robot.data.root_link_quat_w[pending], self.final_quat_w[pending],
           self.height_active[pending], self.height_difficulty[pending], self.cfg
@@ -537,12 +647,30 @@ class BimanualWristCommand(CommandTerm):
     )
     pack_offset = None
     if self.cfg.capability_pack and not self.scripted:
-      from .operation_clip import evaluate_clip
+      from .operation_clip import evaluate_clip, continue_clip
       age = (self.elapsed-self.cfg.reach_delay_s-self.cfg.reach_duration_s).clamp_min(0)
-      pack_offset, pack_orientation, self.pack_stage = evaluate_clip(self.pack_delta, self.pack_quat, self.pack_duration, age)
-      active = self.continuous_active & (self.elapsed >= self.cfg.reach_delay_s+self.cfg.reach_duration_s)
+      finished = (age[:, None]-self.pack_start_time >= self.pack_duration.sum(1)) & self.persistent_active[:, None]
+      ids = finished.any(-1).nonzero().flatten()
+      if len(ids):
+        self.pack_start_time[ids] += self.pack_duration[ids].sum(1)*finished[ids]
+        self.pack_continuations[ids] += finished[ids].float()
+        delta, quats, durations = self.pack_delta[ids], self.pack_quat[ids], self.pack_duration[ids]
+        continue_clip(delta, quats, durations, finished[ids], self.sampled_offset_b[ids],
+                      self.pack_reference_quat[ids], self.final_quat_w[ids], self.height_active[ids],
+                      self.height_difficulty[ids], self.cfg)
+        self.pack_delta[ids], self.pack_quat[ids], self.pack_duration[ids] = delta, quats, durations
+      pack_offset, pack_orientation, self.pack_stage = evaluate_clip(self.pack_delta, self.pack_quat, self.pack_duration, age[:, None]-self.pack_start_time)
+      active = self.continuous_active & ~self.egodex_active & (self.elapsed >= self.cfg.reach_delay_s+self.cfg.reach_duration_s)
       self.target_pos_w.copy_(torch.where(active[:, None, None], self.final_pos_w+pack_offset, self.target_pos_w))
       self.target_quat_w.copy_(torch.where(active[:, None, None], pack_orientation, self.target_quat_w))
+    if self.egodex_positions is not None:
+      active = self.egodex_active & (self.elapsed >= self.cfg.reach_delay_s+self.cfg.reach_duration_s)
+      ids = active.nonzero().flatten()
+      if len(ids):
+        ego_pos, ego_shoulder, ego_quat = self._egodex_targets(ids, self.elapsed[ids]-self.cfg.reach_delay_s-self.cfg.reach_duration_s)
+        self.target_pos_w[ids] = ego_pos
+        self.target_shoulder_height[ids] = ego_shoulder
+        self.target_quat_w[ids] = ego_quat
     self.target_lin_vel_w.copy_(
       (self.target_pos_w - self.previous_target_pos_w) / self._env.step_dt
     )
@@ -559,6 +687,15 @@ class BimanualWristCommand(CommandTerm):
       # Smooth shared lift, <= either hand's lift; avoid the velocity kink of min.
       shared_lift = z[:, 0]*z[:, 1]/(z.sum(-1)+.02)
       self.target_shoulder_height += shared_lift * active * self.height_active
+    if self.egodex_positions is not None:
+      active = self.egodex_active & (self.elapsed >= self.cfg.reach_delay_s+self.cfg.reach_duration_s)
+      ids = active.nonzero().flatten()
+      if len(ids):
+        ego_pos, ego_shoulder, ego_quat = self._egodex_targets(ids, self.elapsed[ids]-self.cfg.reach_delay_s-self.cfg.reach_duration_s)
+        self.target_pos_w[ids] = ego_pos
+        self.target_shoulder_height[ids] = ego_shoulder
+        self.target_quat_w[ids] = ego_quat
+      self.target_lin_vel_w.copy_((self.target_pos_w - self.previous_target_pos_w) / self._env.step_dt)
 
   def _advance_transport_reference(self) -> None:
     twist = self._env.command_manager.get_term("twist")
@@ -584,6 +721,7 @@ class BimanualWristCommand(CommandTerm):
       rotation4 = rotation[:, None, :, :].expand(-1, 4, -1, -1)
       self.pack_delta.copy_(quat_apply(rotation4, self.pack_delta))
       self.pack_quat.copy_(quat_mul(rotation4, self.pack_quat))
+      self.pack_reference_quat.copy_(quat_mul(rotation[:, 0], self.pack_reference_quat))
     self.transport_reference_pos += delta
     self.transport_reference_yaw += angle
 
@@ -631,6 +769,7 @@ class BimanualWristCommand(CommandTerm):
     self.ground_active.zero_()
     self.bilateral_ground_active.zero_()
     self.continuous_active.zero_()
+    self.persistent_active.zero_()
     self.height_difficulty.zero_()
     shoulder_height = self.shoulder_height
     self.start_shoulder_height.copy_(shoulder_height)
@@ -802,11 +941,23 @@ class BimanualWristCommand(CommandTerm):
         self.metrics["pack_peak_wrist_error_masked"] = pack[:, 2]*self.continuous_active
         self.metrics["pack_lift_fraction"] = pack[:, 3]/total
         self.metrics["pack_place_fraction"] = pack[:, 4]/total
+        self.metrics["persistent_fraction"] = self.persistent_active.float()
+        self.metrics["persistent_continuations_masked"] = self.pack_continuations.mean(-1)*self.persistent_active
+        mask = steady & self.persistent_active
+        ps = self.persistent_statistics
+        for column,value in enumerate((torch.ones_like(total),pos_error.max(-1).values,
+                                       quat_error_magnitude(self.desired_wrist_quat_w,self.robot_wrist_quat_w).max(-1).values,
+                                       self.metrics['shoulder_height_error'])):
+          ps[:,column] += value*mask
+        for column,key in enumerate(('steady_fraction','wrist_error_masked','rotation_error_masked','shoulder_error_masked')):
+          self.metrics['persistent_'+key] = ps[:,column]/total
       denominator = stats[:, 0].clamp_min(1)
       for column, key in enumerate(("continuous_fraction", "continuous_wrist_error_masked", "continuous_rotation_error_masked",
                                     "continuous_moving_fraction", "continuous_command_speed_masked",
                                     "continuous_projected_speed_masked", "continuous_velocity_error_masked"), start=1):
         self.metrics[key] = stats[:, column] / denominator
+    if self.cfg.diagnostics_enabled:
+      self.operation_diagnostics.update(self)
 
 
 @dataclass(kw_only=True)
@@ -838,7 +989,15 @@ class BimanualWristCommandCfg(CommandTermCfg):
   reach_delay_s: float = 1.0
   reach_duration_s: float = 2.0
   continuous_probability: float = 0.0
+  egodex_probability: float = 0.0
+  """Fraction of resets that use a mapped EgoDex continuous command."""
+  egodex_data_path: str = "data/egodex_test_wrist_commands.npz"
+  egodex_source_fps: float = 30.0
   capability_pack: bool = False
+  persistent_probability: float = 0.0
+  diagnostics_enabled: bool = False
+  diagnostics_trace_period_steps: int = 10000
+  diagnostics_trace_window_steps: int = 128
   continuous_displacement: float = .03
   continuous_period_range: tuple[float, float] = (4., 6.)
   curriculum_warmup_steps: int = 30_000

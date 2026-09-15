@@ -1,6 +1,20 @@
-# Autonomous G1 tuning task
+# RETIRED: watcher no longer invokes Codex
+
+Since 2026-09-15, `autotune_watch.sh` only extracts deterministic TensorBoard
+values and emails JSON. This prompt is retained as experiment history and is not
+read by the watcher. No completion-triggered model analysis or next-run decision
+is performed.
+
+# Historical autonomous G1 tuning task
 
 Read AGENTS.md first and obey all repository/environment restrictions.
+
+LATEST for `g1_persistent_operation_*`: read
+`experiments/persistent_operation_next.md` and its materialized JSON. ONE four-way
+screen only. Analyze all siblings, report conditional persistent/FD/contact
+metrics and censored/absent coverage honestly; email existing summary via watcher,
+write STOP_REQUESTED and STOP. Do NOT launch confirmation or any further run.
+This overrides all older stage promotion rules for this group.
 
 LATEST less-conservative user revision for continuous-stage completions: read
 `experiments/operation_capability_pack_next.md`. The running3cm baseline and its

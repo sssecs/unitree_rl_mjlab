@@ -305,3 +305,10 @@ pack after CPU and GPU validation. See `operation_capability_pack_next.md` and
 `operation_capability_pack_screen_v1.json`. One four-GPU strategy screen only,
 then existing analysis/email and stop for visual review. This overrides older
 small-stage promotion instructions below; no new rewards or human references.
+# 2026-09-15 active stage: persistent operation and self-obstacle diagnostics
+
+User approved `persistent_operation_next.md`: one four-card same-seed screen
+from balanced model9998, unchanged rewards/physics/workspace/disturbances,
+control versus30/60/90% successor clip probability; after CPU/GPU validation.
+No wrist-error termination or current-leg-pose IK rejection. After screen
+analyze/email and stop; no automatic next stage or multi-seed confirmation.

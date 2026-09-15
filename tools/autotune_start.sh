@@ -15,7 +15,7 @@ if [ -s "$STATE_DIR/STOP_REQUESTED" ]; then
     echo "Archived previous stop decision: $STOP_ARCHIVE"
 fi
 
-for command_name in codex flock jq ssh tmux; do
+for command_name in flock jq python3 ssh tmux; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
         echo "ERROR: required command not found: $command_name"
         exit 1

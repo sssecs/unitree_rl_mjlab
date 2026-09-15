@@ -1,0 +1,8 @@
+{
+  "hypothesis": "A 25% mixture of fixed-frame, arm-length-scaled EgoDex test trajectories can raise continuous wrist-command speed without discarding the existing persistent-operation/balance distribution.",
+  "source": "data/egodex_test_wrist_commands.npz; 3243 test clips, fixed shoulder-ground frame, native 30 Hz timing, no human actions or future observations",
+  "baseline_checkpoint": "2026-09-14_16-45-40/model_14997.pt (persistent60)",
+  "training": "one 4-GPU DDP pilot; 1024 environments per rank / 4096 total; seed 2601; 5000 new iterations",
+  "single_conceptual_change": "egodex_probability=0.25; all existing rewards, physics, workspace, clutch and continuous/persistent settings retained",
+  "limitations": "The EgoDex test split is used for training in this user-requested pilot, so it is not an independent evaluator. No automated held-out rollout is run."
+}

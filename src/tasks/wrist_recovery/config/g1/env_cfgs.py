@@ -116,6 +116,12 @@ def unitree_g1_wrist_recovery_env_cfg(
     history_length=4,
   )
   cfg.scene.sensors = (cfg.scene.sensors or ()) + (nonfoot_ground,)
+  cfg.scene.sensors += (ContactSensorCfg(
+    name="arm_leg_contact",
+    primary=ContactMatch(mode="body", entity="robot", pattern=r"(left|right)_(shoulder_(pitch|roll|yaw)|elbow|wrist_(roll|pitch|yaw))_link"),
+    secondary=ContactMatch(mode="body", entity="robot", pattern=r"(left|right)_(hip_(pitch|roll|yaw)|knee|ankle_(pitch|roll))_link"),
+    fields=("found", "force"), reduce="maxforce", num_slots=1, history_length=4,
+  ),)
 
   cfg.events.pop("push_robot", None)
   cfg.events["hand_payload"] = EventTermCfg(

@@ -1878,3 +1878,157 @@ as policy quality. Source/config/provenance archived per run; local journal
 handoff records do not alter running code. Watcher confirmed running in tmux;
 new group registered, cancelled small-motion group remains handled. Completion
 analysis must email existing summary and STOP after this one screen.
+## 2026-09-15: persistent-operation screen authorized
+
+User requested execution of proposed sustained task/active-avoidance stage.
+Previous pack manually analyzed after watcher quota failure (three failed
+completion attempts, not training failure): all four exit0,5000new iterations,
+all histories finite. Balanced recommended provisionally: final500 conditional
+worst-hand continuous position4.82mm, orientation.149rad, shoulder1.55cm,
+episode598.25, reported wrist velocity error.1988m/s. No held-out proof or
+guaranteed arm-leg obstruction evidence; keep remote checkpoints.
+
+Hypothesis: sustain independent task clips beyond endpoint holding while keeping
+rewards/PPO/physics/workspace/pushes and load distribution fixed. New successor
+clips retain original anchor, per-hand endpoint continuity and independent
+reference rotation; no measured body dragging or accumulating workspace drift.
+Common diagnostics add arm-leg contact/recovery and reported-vs-FD velocity;
+no observation/action dimensions change. Sparse CSV bounded128steps/10000steps,
+first2envs. Compiled CPU model has8arm/22leg active collision geoms and9physical
+arm-leg contact detections in128synthetic probes, not training reference poses.
+
+Materialized `persistent_operation_screen_v1.json`: one four-way screen,
+4096envs per H20/16384concurrent, seed2401, balanced9998 warm-start,
+5000 NEW iterations, expected14997 final. Control/30/60/90% persistence within
+continuous episodes. Fresh shared balanced15000/60000 command curricula;12s
+episodes retained, so successors coverage must be measured. Frozen gates and
+limitations in `persistent_operation_next.md`.
+CPU reset/frame/successor/diagnostic regressions pass. GPU smoke
+`g1_persistent_operation_validate_v1` completed exit0,256envs/30 NEW iterations,
+steps9998--10027, all152 scalar histories finite and534actor/critic compatible.
+Successors exercised (last mean hand continuation1.0); all three modes present
+in histories, episode598.99 at full-difficulty no-push-yet smoke. No arm-leg
+contact/release events occurred: live contact-associated recovery remains
+unverified, despite compiled CPU geometry audit. Two-env post-reach CSV recorded
+reported target velocity error.217m/s versus FD.182m/s, discrepancy.082m/s;
+instantaneous-vs-interval averaging explains some, not all, error. These sparse
+samples cannot establish whole-population jitter spectrum; keep rewards fixed
+and compare formal control. Full-screen launch pending idle-status check;
+after completion watcher analyzes/emails existing text and STOPs.
+
+Formal group successfully launched and registered:
+`g1_persistent_operation_screen_v1_{control,persistent30,persistent60,persistent90}`,
+GPU0--3,4096envs each confirmed by actual metadata. All four entered PPO;
+initial full histories finite,534observations compatible, compiled collision
+audits saved in each run directory. Logs under teacher directory:
+`2026-09-14_16-45-29`, `16-45-34`, `16-45-40`, `16-45-47` (same date prefix,
+remote UTC times; local launch2026-09-15). Early counters10004--10010 confirm
+resume, not final policy performance. Watcher restarted via provided script,
+old quota stop archived; running Terra/medium,60s shell-only polling. Previous
+quota-failed group remains excluded; no old analysis replay. Formal provenance
+archives code/config before launch; these local handoff notes do not change
+running code. Expected final14997, then one completion analysis/email and STOP.
+
+## 2026-09-15: persistent-operation screen v1 completion — STOP
+
+- Completed registered screen: `g1_persistent_operation_screen_v1_{control,
+  persistent30,persistent60,persistent90}`.  Every supplied exit code is 0;
+  all four log tails reach zero ETA without a traceback or numerical/configuration
+  failure, retain `model_14997.pt`, and have finite 5,000-scalar TensorBoard
+  histories.  This was four one-H20 runs with 4,096 environments per process
+  (16,384 concurrent), seed 2401, and 5,000 new PPO iterations from the same
+  balanced warm-start.  No held-out matrix was requested or run.
+- Final-500 normalized command diagnostics, control/30/60/90% respectively:
+  continuous wrist error is 0.463/0.462/0.447/0.472 cm, rotation error
+  0.139/0.137/0.134/0.138 rad, command/projected wrist speed
+  0.0572/0.0570, 0.0562/0.0561, 0.0553/0.0552, and 0.0546/0.0544 m/s,
+  and reported velocity error 0.198/0.197/0.192/0.201 m/s.  Thus the projected
+  speed gain is about 99% in every case and the frozen continuous precision,
+  speed, and gain gates pass.  Pack shoulder error is 1.280/1.338/1.393/1.308
+  cm and mean episode peak wrist error 1.803/1.802/1.814/1.831 cm; these also
+  pass their absolute limits.  Bilateral-moving and low-target conditional
+  diagnostics are nonzero and remain within their frozen wrist/shoulder and
+  0.16--0.28-m anchor limits (the latter target min/max is about 0.199--0.241 m).
+- Persistence exposure is real but is not the configured probability itself:
+  overall persistent fractions are 0/17.99/36.00/54.20%, with steady fractions
+  0/13.40/26.86/40.42%.  Conditional mean hand continuations are absent/0.987/
+  0.992/0.991, and persistent-only wrist/rotation/shoulder errors are absent,
+  0.462 cm/0.137 rad/1.327 cm, 0.447 cm/0.134 rad/1.391 cm, and
+  0.472 cm/0.138 rad/1.304 cm.  All persistence-specific gates pass where
+  exposure exists.  The 12-s episode horizon means this does not establish
+  minute-scale operation.
+- Stability is comparable: episode length is 598.07/597.47/598.37/597.84 of
+  600, mean backward lean 0.00051/0.00045/0.00065/0.00046 rad, and action
+  acceleration 0.829/0.828/0.804/0.841.  The 60% sibling has the lowest
+  continuous wrist/rotation/velocity errors and leg-acceleration snapshot
+  (60.64 versus 62.75 control), but this fixed-seed screen ranks a provisional
+  candidate only; it is not a final policy or isolated one-factor causal claim.
+  Preserve provisional candidate
+  `/home/dev/unitree_rl_mjlab/logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-14_16-45-40/model_14997.pt`
+  and all sibling checkpoints for visual/manual review.
+- Critical limitation: final-500 arm--leg contact fraction, release-event
+  count, and recovery count are all zero in every sibling.  Consequently
+  conditional contact wrist error and recovery time are absent, not passing
+  zeros; there are no released-contact cases from which to estimate censored or
+  successful recovery.  Contact-associated active avoidance/recovery therefore
+  remains unverified despite the prior compiled-geometry probe.  The finite-
+  difference/report velocity errors are 0.145/0.198, 0.145/0.197, 0.141/0.192,
+  and 0.148/0.201 m/s; their difference is a diagnostic only because the FD
+  derivative is interval-averaged while the reported velocity is instantaneous.
+- Decision: the explicitly authorized one-screen budget is exhausted.  Stop
+  after emailing this existing summary through the watcher; do not launch a
+  confirmation, evaluator, reward change, workspace expansion, or another
+  persistent-operation run.  User visual review and final policy judgment are
+  required.
+## 2026-09-15: watcher changed to metrics-only notification
+
+User judged automatic Codex interpretation unnecessary because final policy
+selection is manual. `autotune_watch.sh` no longer calls `codex exec`, reads its
+prompt, spends model tokens, launches held-out evaluation, changes experiments,
+or writes an analytical decision. On completion it deterministically reads the
+last500 TensorBoard entries through `summarize_wrist_training.py`, emits JSON
+with exit code, log/checkpoint path, all conditional wrist metrics, selected
+stability/contact values, termination values and nonfinite tags, emails that
+JSON, marks the trial handled, and continues idle polling. Report extraction
+retains a bounded three-attempt SSH/TensorBoard retry. The prior two-hour held-out
+matrix remains disabled; these values are training diagnostics, not independent
+evaluation. SMTP recipient/config unchanged and secrets remain outside source.
+
+Manual candidate fetch: persistent60
+`2026-09-14_16-45-40/model_14997.pt` downloaded to
+`models/best_ground/model.pt` without backup, local/remote SHA256
+`fc3cc22ef6d0257611c562a1ae31b0869c4629153da6ccd0874fd7386cf90bf2`.
+
+## 2026-09-15: EgoDex-test command pilot v1 completion — manual review
+
+- `g1_egodex_test_pilot_v1` completed normally (exit 0): four-H20 DDP, 1,024
+  environments per rank / 4,096 total, seed base 2601, 5,000 additional PPO
+  iterations (655,360,000 global simulation steps), warm-started from the
+  persistent60 candidate.  All TensorBoard histories are finite.  The final
+  checkpoint is
+  `/home/dev/unitree_rl_mjlab/logs/rsl_rl/g1_wrist_recovery_teacher/2026-09-15_03-11-37/model_19996.pt`.
+- This pilot mixes 25% mapped EgoDex test-set position trajectories with the
+  existing command distribution.  Final-500 training diagnostics: mean episode
+  length 592.13/600; mean wrist position error 0.537 cm overall, 0.625 cm on
+  the existing continuous mask, 0.822 cm on the ground mask; height-conditioned
+  wrist/shoulder error 0.600/0.845 cm.  Pack shoulder error is 1.331 cm;
+  bilateral-ground wrist/shoulder error is 1.446/2.041 cm.  Mean forward bend
+  is 0.350 rad and backward-lean termination remains zero.  This supports that
+  mapped low-workspace commands can be learned without a numerical or gross
+  stability failure.
+- Relative to persistent60, continuous wrist precision is weaker (0.625 vs
+  0.447 cm), mean episode length is lower (592.13 vs 598.37), and action
+  acceleration is higher (1.047 vs 0.804).  Continuous command/projected speed
+  is 0.0371/0.0372 m/s versus 0.0553/0.0552 m/s.  This comparison is only a
+  directional diagnostic: it is a different seed, DDP layout, warm-start
+  duration, and command mixture, rather than an isolated controlled ablation.
+- Do not interpret the 0.273-rad continuous wrist-orientation metric as EgoDex
+  hand-orientation tracking: this pilot maps positions and shoulder height only;
+  it leaves the pre-existing orientation-command generator active.  No
+  EgoDex-only masked TensorBoard metrics or independent evaluator were run, so
+  this run does not yet establish fast real-teleoperation trajectory tracking.
+  In particular, clips hold at their endpoint by design, reducing the aggregate
+  moving fraction and speed statistic.  The next diagnostic change should add
+  EgoDex-only error/speed/endpoint-hold masks before making reward or curriculum
+  conclusions.  The test set has been used for training here and is therefore
+  not held out.

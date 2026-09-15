@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import mimetypes
 import os
 import smtplib
 import ssl
@@ -28,6 +29,7 @@ def main() -> None:
   parser = argparse.ArgumentParser()
   parser.add_argument("subject")
   parser.add_argument("body_file", type=Path)
+  parser.add_argument("--attachment", type=Path, action="append", default=[])
   parser.add_argument("--config", type=Path, default=Path(".autotune/notify.env"))
   args = parser.parse_args()
   cfg = load_env(args.config)
@@ -48,6 +50,15 @@ def main() -> None:
   message["From"] = cfg["AUTOTUNE_EMAIL_FROM"]
   message["To"] = cfg["AUTOTUNE_EMAIL_TO"]
   message.set_content(args.body_file.read_text())
+  for attachment in args.attachment:
+    if not attachment.is_file():
+      raise FileNotFoundError(f"Attachment not found: {attachment}")
+    content_type, _ = mimetypes.guess_type(attachment.name)
+    maintype, subtype = (content_type or "application/octet-stream").split("/", 1)
+    message.add_attachment(
+      attachment.read_bytes(), maintype=maintype, subtype=subtype,
+      filename=attachment.name,
+    )
   host = cfg["AUTOTUNE_SMTP_HOST"]
   port = int(cfg.get("AUTOTUNE_SMTP_PORT", "465"))
   use_ssl = cfg.get("AUTOTUNE_SMTP_SSL", "true").lower() == "true"
