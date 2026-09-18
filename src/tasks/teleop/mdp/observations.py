@@ -102,3 +102,39 @@ def teleop_tracking_errors(
     ),
     dim=-1,
   )
+
+
+def command_wrist_linear_velocity_absolute(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+) -> torch.Tensor:
+  """6-D emitted wrist-target linear velocity in simulator world."""
+  command = cast(
+    SparseWholeBodyCommand,
+    env.command_manager.get_term(command_name),
+  )
+  return torch.cat(
+    (
+      command.cmd_left_wrist_lin_vel_w,
+      command.cmd_right_wrist_lin_vel_w,
+    ),
+    dim=-1,
+  )
+
+
+def sim_wrist_linear_velocity_absolute(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+) -> torch.Tensor:
+  """Privileged 6-D actual wrist linear velocity in simulator world."""
+  command = cast(
+    SparseWholeBodyCommand,
+    env.command_manager.get_term(command_name),
+  )
+  return torch.cat(
+    (
+      command.sim_left_wrist_lin_vel_w,
+      command.sim_right_wrist_lin_vel_w,
+    ),
+    dim=-1,
+  )

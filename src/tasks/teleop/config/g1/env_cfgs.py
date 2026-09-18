@@ -11,6 +11,23 @@ from src.tasks.teleop.mdp import SparseWholeBodyCommandCfg
 from src.tasks.teleop.teleop_env_cfg import make_teleop_env_cfg
 
 
+FEET = ("left_ankle_roll_link", "right_ankle_roll_link")
+FOOT_GEOMS = tuple(
+  f"{side}_foot{i}_collision"
+  for side in ("left", "right")
+  for i in range(1, 8)
+)
+
+# Stock G1 has no dedicated patella collision geom.  Its left/right knee_link
+# collision support is represented by shin + linkage-brace capsules.
+KNEE_ALLOWED_GEOMS = (
+  "left_shin_collision",
+  "left_linkage_brace_collision",
+  "right_shin_collision",
+  "right_linkage_brace_collision",
+)
+
+
 def unitree_g1_teleop_env_cfg(
   play: bool = False,
   command_dir: str = "",
@@ -19,6 +36,35 @@ def unitree_g1_teleop_env_cfg(
   cfg = make_teleop_env_cfg()
 
   cfg.scene.entities = {"robot": get_g1_robot_cfg()}
+
+  feet_ground_cfg = ContactSensorCfg(
+    name="feet_ground_contact",
+    primary=ContactMatch(
+      mode="subtree",
+      pattern=r"^(left_ankle_roll_link|right_ankle_roll_link)$",
+      entity="robot",
+    ),
+    secondary=ContactMatch(mode="body", pattern="terrain"),
+    fields=("found", "force"),
+    reduce="netforce",
+    num_slots=1,
+    track_air_time=True,
+  )
+
+  nonfoot_nonknee_ground_cfg = ContactSensorCfg(
+    name="nonfoot_nonknee_ground_touch",
+    primary=ContactMatch(
+      mode="geom",
+      entity="robot",
+      pattern=r".*_collision\d*$",
+      exclude=FOOT_GEOMS + KNEE_ALLOWED_GEOMS,
+    ),
+    secondary=ContactMatch(mode="body", pattern="terrain"),
+    fields=("found", "force"),
+    reduce="none",
+    num_slots=1,
+    history_length=4,
+  )
 
   self_collision_cfg = ContactSensorCfg(
     name="self_collision",
@@ -37,7 +83,11 @@ def unitree_g1_teleop_env_cfg(
     num_slots=1,
     history_length=4,
   )
-  cfg.scene.sensors = (self_collision_cfg,)
+  cfg.scene.sensors = (
+    feet_ground_cfg,
+    nonfoot_nonknee_ground_cfg,
+    self_collision_cfg,
+  )
 
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
@@ -63,7 +113,14 @@ def unitree_g1_teleop_env_cfg(
   cfg.rewards["torso_upright"].params[
     "asset_cfg"
   ].body_names = ("torso_link",)
+  cfg.rewards["feet_slide"].params[
+    "asset_cfg"
+  ].body_names = FEET
+  cfg.rewards["quiet_feet"].params[
+    "asset_cfg"
+  ].body_names = FEET
 
+  cfg.sim.contact_sensor_maxmatch = 128
   cfg.viewer.body_name = "torso_link"
 
   if play:

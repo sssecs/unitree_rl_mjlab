@@ -44,6 +44,14 @@ def make_teleop_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.sim_task_state_absolute,
       params={"command_name": "teleop"},
     ),
+    "command_wrist_lin_vel_absolute": ObservationTermCfg(
+      func=mdp.command_wrist_linear_velocity_absolute,
+      params={"command_name": "teleop"},
+    ),
+    "sim_wrist_lin_vel_absolute": ObservationTermCfg(
+      func=mdp.sim_wrist_linear_velocity_absolute,
+      params={"command_name": "teleop"},
+    ),
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_ang_vel"},
@@ -81,13 +89,13 @@ def make_teleop_env_cfg() -> ManagerBasedRlEnvCfg:
       terms=actor_terms,
       concatenate_terms=True,
       enable_corruption=True,
-      history_length=1,
+      history_length=3,
     ),
     "critic": ObservationGroupCfg(
       terms=critic_terms,
       concatenate_terms=True,
       enable_corruption=False,
-      history_length=1,
+      history_length=3,
     ),
   }
 
@@ -217,10 +225,25 @@ def make_teleop_env_cfg() -> ManagerBasedRlEnvCfg:
   # -----------------------------------------------------------------------
 
   rewards: dict[str, RewardTermCfg] = {
-    "wrist_position": RewardTermCfg(
-      func=mdp.wrist_position_tracking_exp,
+    "wrist_pos_coarse": RewardTermCfg(
+      func=mdp.wrist_position_coarse_exp,
+      weight=3.0,
+      params={"command_name": "teleop", "std": 0.20},
+    ),
+    "wrist_pos_fine": RewardTermCfg(
+      func=mdp.wrist_position_fine_tanh,
       weight=4.0,
-      params={"command_name": "teleop", "std": 0.12},
+      params={"command_name": "teleop", "std": 0.05},
+    ),
+    "inter_wrist": RewardTermCfg(
+      func=mdp.inter_wrist_position_tracking_exp,
+      weight=0.50,
+      params={"command_name": "teleop", "std": 0.10},
+    ),
+    "wrist_linear_velocity": RewardTermCfg(
+      func=mdp.wrist_linear_velocity_tracking_l2,
+      weight=-0.02,
+      params={"command_name": "teleop"},
     ),
     "wrist_orientation": RewardTermCfg(
       func=mdp.wrist_orientation_tracking_exp,
@@ -287,6 +310,40 @@ def make_teleop_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
       },
+    ),
+    "feet_slide": RewardTermCfg(
+      func=mdp.feet_slide,
+      weight=-0.15,
+      params={
+        "sensor_name": "feet_ground_contact",
+        "asset_cfg": SceneEntityCfg("robot", body_names=()),
+      },
+    ),
+    "quiet_feet": RewardTermCfg(
+      func=mdp.quiet_feet_when_task_stable,
+      weight=-0.50,
+      params={
+        "command_name": "teleop",
+        "wrist_error_threshold": 0.04,
+        "command_wrist_speed_threshold": 0.05,
+        "command_shoulder_speed_threshold": 0.03,
+        "command_heading_rate_threshold": 0.15,
+        "base_speed_threshold": 0.12,
+        "base_ang_speed_threshold": 0.35,
+        "asset_cfg": SceneEntityCfg("robot", body_names=()),
+      },
+    ),
+    "undesired_ground_contacts": RewardTermCfg(
+      func=mdp.undesired_ground_contacts,
+      weight=-1.0,
+      params={
+        "sensor_name": "nonfoot_nonknee_ground_touch",
+        "force_threshold": 1.0,
+      },
+    ),
+    "termination": RewardTermCfg(
+      func=mdp.is_terminated,
+      weight=-200.0,
     ),
     "self_collisions": RewardTermCfg(
       func=mdp.self_collision_cost,

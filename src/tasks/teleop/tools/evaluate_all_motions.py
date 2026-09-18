@@ -40,6 +40,8 @@ ERROR_NAMES = (
   "right_wrist_pos_error",
   "left_wrist_ori_error",
   "right_wrist_ori_error",
+  "left_wrist_lin_vel_error",
+  "right_wrist_lin_vel_error",
   "shoulder_mid_xy_error",
   "shoulder_heading_error",
   "left_shoulder_height_error",

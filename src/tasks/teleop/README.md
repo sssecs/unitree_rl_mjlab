@@ -620,3 +620,64 @@ episode reward sum
 
 `summary.json` contains equal-motion aggregate statistics plus the worst 20
 motions ranked by mean wrist-position error.
+
+
+## v5: wrist reward transfer + velocity + quiet feet + knee support + history
+
+Actor and critic now use:
+
+```python
+history_length = 3
+```
+
+and each frame adds:
+
+```text
+command_wrist_lin_vel_absolute   6
+sim_wrist_lin_vel_absolute       6
+```
+
+The existing 24-D absolute pose command remains unchanged.  Because both the
+per-frame observation dimension and history changed, v4 checkpoints are not
+actor-shape compatible with v5.
+
+Wrist position shaping is now:
+
+```text
+wrist_pos_coarse  +3.0, exp(-RMS_error / 0.20)
+wrist_pos_fine    +4.0, 1 - tanh(RMS_error / 0.05)
+inter_wrist       +0.5, exp(-relative_error / 0.10)
+wrist_velocity    -0.02, bilateral squared linear-velocity error
+```
+
+Command wrist velocity is finite-differenced from the exact emitted target
+(after warm-up/recovery shaping). Alignment/recenter epoch jumps are explicitly
+zeroed rather than exposed as target motion.
+
+Physical-quality terms added:
+
+```text
+feet_slide                  -0.15
+quiet_feet                  -0.50
+undesired_ground_contacts   -1.0
+termination               -200.0
+```
+
+`quiet_feet` is gated and activates only for an already-tracked quasi-static
+task: wrist error <4 cm, wrist target speed <5 cm/s, shoulder-mid target speed
+<3 cm/s, shoulder heading rate <0.15 rad/s, base XY speed <0.12 m/s, and base
+angular speed <0.35 rad/s. Warm-up is excluded.
+
+Kneeling is explicitly allowed. Feet and the collision geoms attached to the
+two G1 knee links are excluded from the undesired-ground contact sensor:
+
+```text
+left_shin_collision
+left_linkage_brace_collision
+right_shin_collision
+right_linkage_brace_collision
+```
+
+The stock G1 MJCF has no separate patella collision geom, so this permits
+knee/shin-link support. If later we need "patella allowed, shin forbidden", the
+MJCF needs dedicated knee-pad collision geoms.

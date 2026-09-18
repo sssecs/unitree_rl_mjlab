@@ -44,6 +44,8 @@ _TRACKING_ERROR_NAMES = (
   "right_wrist_pos_error",
   "left_wrist_ori_error",
   "right_wrist_ori_error",
+  "left_wrist_lin_vel_error",
+  "right_wrist_lin_vel_error",
   "shoulder_mid_xy_error",
   "shoulder_heading_error",
   "left_shoulder_height_error",
@@ -267,6 +269,22 @@ class SparseWholeBodyCommand(CommandTerm):
       self.num_envs, dtype=torch.bool, device=self.device
     )
 
+    # Emitted command derivatives in fixed world coordinates. These are
+    # finite differences of the ACTUAL cmd_* target after warm-up/recovery
+    # shaping, not derivatives of raw NPZ arrays.
+    self._cmd_left_wrist_lin_vel_w = torch.zeros(
+      self.num_envs, 3, dtype=torch.float32, device=self.device
+    )
+    self._cmd_right_wrist_lin_vel_w = torch.zeros(
+      self.num_envs, 3, dtype=torch.float32, device=self.device
+    )
+    self._cmd_shoulder_mid_lin_vel_ew = torch.zeros(
+      self.num_envs, 2, dtype=torch.float32, device=self.device
+    )
+    self._cmd_shoulder_heading_rate_w = torch.zeros(
+      self.num_envs, dtype=torch.float32, device=self.device
+    )
+
     # Per-episode trajectory statistics.  These are accumulated ONLY during
     # the actual NPZ tracking phase (warm-up and recovery are excluded), then
     # finalized in reset() so TensorBoard receives true time-averaged/max
@@ -291,6 +309,8 @@ class SparseWholeBodyCommand(CommandTerm):
       "cmd_vs_sim_right_wrist_pos_error",
       "cmd_vs_sim_left_wrist_ori_error",
       "cmd_vs_sim_right_wrist_ori_error",
+      "cmd_vs_sim_left_wrist_lin_vel_error",
+      "cmd_vs_sim_right_wrist_lin_vel_error",
       "cmd_vs_sim_shoulder_mid_xy_error",
       "cmd_vs_sim_shoulder_heading_error",
       "cmd_vs_sim_left_shoulder_height_error",
@@ -359,6 +379,10 @@ class SparseWholeBodyCommand(CommandTerm):
     return self.robot.data.body_link_quat_w[:, self.left_wrist_index]
 
   @property
+  def sim_left_wrist_lin_vel_w(self) -> torch.Tensor:
+    return self.robot.data.body_link_lin_vel_w[:, self.left_wrist_index]
+
+  @property
   def sim_right_wrist_pos_w(self) -> torch.Tensor:
     return self.robot.data.body_link_pos_w[:, self.right_wrist_index]
 
@@ -369,6 +393,10 @@ class SparseWholeBodyCommand(CommandTerm):
   @property
   def sim_right_wrist_quat_w(self) -> torch.Tensor:
     return self.robot.data.body_link_quat_w[:, self.right_wrist_index]
+
+  @property
+  def sim_right_wrist_lin_vel_w(self) -> torch.Tensor:
+    return self.robot.data.body_link_lin_vel_w[:, self.right_wrist_index]
 
   @property
   def sim_left_shoulder_pos_w(self) -> torch.Tensor:
@@ -888,6 +916,22 @@ class SparseWholeBodyCommand(CommandTerm):
     )
 
   @property
+  def cmd_left_wrist_lin_vel_w(self) -> torch.Tensor:
+    return self._cmd_left_wrist_lin_vel_w
+
+  @property
+  def cmd_right_wrist_lin_vel_w(self) -> torch.Tensor:
+    return self._cmd_right_wrist_lin_vel_w
+
+  @property
+  def cmd_shoulder_mid_lin_vel_ew(self) -> torch.Tensor:
+    return self._cmd_shoulder_mid_lin_vel_ew
+
+  @property
+  def cmd_shoulder_heading_rate_w(self) -> torch.Tensor:
+    return self._cmd_shoulder_heading_rate_w
+
+  @property
   def command(self) -> torch.Tensor:
     """24-D ABSOLUTE teacher command in a fixed per-environment world.
 
@@ -974,6 +1018,10 @@ class SparseWholeBodyCommand(CommandTerm):
     self.warmup_time[env_ids] = 0.0
     self.recovery_time[env_ids] = 0.0
     self.recovery_started[env_ids] = False
+    self._cmd_left_wrist_lin_vel_w[env_ids] = 0.0
+    self._cmd_right_wrist_lin_vel_w[env_ids] = 0.0
+    self._cmd_shoulder_mid_lin_vel_ew[env_ids] = 0.0
+    self._cmd_shoulder_heading_rate_w[env_ids] = 0.0
     self._alignment_pending[env_ids] = True
 
   def _sample_chained_motion(self, env_ids: torch.Tensor) -> None:
@@ -1003,6 +1051,10 @@ class SparseWholeBodyCommand(CommandTerm):
     self.warmup_time[env_ids] = 0.0
     self.recovery_time[env_ids] = 0.0
     self.recovery_started[env_ids] = False
+    self._cmd_left_wrist_lin_vel_w[env_ids] = 0.0
+    self._cmd_right_wrist_lin_vel_w[env_ids] = 0.0
+    self._cmd_shoulder_mid_lin_vel_ew[env_ids] = 0.0
+    self._cmd_shoulder_heading_rate_w[env_ids] = 0.0
 
     # _update_command() is called after mjlab's post-step forward(), so current
     # derived body kinematics are valid here.  Align the next clip immediately.
@@ -1029,6 +1081,14 @@ class SparseWholeBodyCommand(CommandTerm):
         # These envs now start at warm-up alpha=0; do not advance again below.
         pending_before = pending_before.clone()
         pending_before[chain_ids] = True
+
+    # Snapshot emitted targets before phase advancement.  The finite difference
+    # at the end of this update is therefore the exact command motion seen
+    # between consecutive policy steps.
+    prev_left_wrist_pos_w = self.cmd_left_wrist_pos_w.clone()
+    prev_right_wrist_pos_w = self.cmd_right_wrist_pos_w.clone()
+    prev_shoulder_mid_xy_ew = self.cmd_shoulder_mid_xy_ew.clone()
+    prev_shoulder_heading_w = self.cmd_shoulder_heading_w.clone()
 
     warmup_duration = float(self.cfg.warmup_duration_s)
     if warmup_duration > 0.0:
@@ -1089,6 +1149,31 @@ class SparseWholeBodyCommand(CommandTerm):
     )
     self._update_npz_targets(env_ids)
 
+    inv_dt = 1.0 / max(dt, 1.0e-8)
+    self._cmd_left_wrist_lin_vel_w[:] = (
+      self.cmd_left_wrist_pos_w - prev_left_wrist_pos_w
+    ) * inv_dt
+    self._cmd_right_wrist_lin_vel_w[:] = (
+      self.cmd_right_wrist_pos_w - prev_right_wrist_pos_w
+    ) * inv_dt
+    self._cmd_shoulder_mid_lin_vel_ew[:] = (
+      self.cmd_shoulder_mid_xy_ew - prev_shoulder_mid_xy_ew
+    ) * inv_dt
+
+    heading_delta = torch.atan2(
+      torch.sin(self.cmd_shoulder_heading_w - prev_shoulder_heading_w),
+      torch.cos(self.cmd_shoulder_heading_w - prev_shoulder_heading_w),
+    )
+    self._cmd_shoulder_heading_rate_w[:] = heading_delta * inv_dt
+
+    # Alignment/recenter is a coordinate epoch change, not physical target
+    # velocity. Chained-clip starts use the same rule.
+    if torch.any(pending_before):
+      self._cmd_left_wrist_lin_vel_w[pending_before] = 0.0
+      self._cmd_right_wrist_lin_vel_w[pending_before] = 0.0
+      self._cmd_shoulder_mid_lin_vel_ew[pending_before] = 0.0
+      self._cmd_shoulder_heading_rate_w[pending_before] = 0.0
+
   def _update_npz_targets(self, env_ids: torch.Tensor):
     if len(env_ids) == 0:
       return
@@ -1134,6 +1219,14 @@ class SparseWholeBodyCommand(CommandTerm):
       "right_wrist_ori_error": quat_error_magnitude(
         self.cmd_right_wrist_quat_w,
         self.sim_right_wrist_quat_w,
+      ),
+      "left_wrist_lin_vel_error": torch.linalg.vector_norm(
+        self.cmd_left_wrist_lin_vel_w - self.sim_left_wrist_lin_vel_w,
+        dim=-1,
+      ),
+      "right_wrist_lin_vel_error": torch.linalg.vector_norm(
+        self.cmd_right_wrist_lin_vel_w - self.sim_right_wrist_lin_vel_w,
+        dim=-1,
       ),
       "shoulder_mid_xy_error": torch.linalg.vector_norm(
         self.cmd_shoulder_mid_xy_w
