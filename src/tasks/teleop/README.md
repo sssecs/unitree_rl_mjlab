@@ -311,7 +311,8 @@ the directory takes precedence.
 ### Play/debug one motion
 
 Play mode fixes `motion_id=0` (the first file in sorted recursive path order)
-and loops it. You can change:
+and repeatedly runs `warm-up -> motion -> recovery -> next cycle` without a
+physics reset. You can change:
 
 ```python
 teleop_cmd.fixed_motion_id = 17
@@ -428,20 +429,194 @@ the selected motion.
 
 The NPZ motion clock is frozen during warm-up.
 
-For an 8.0 s clip with the default 0.8 s pre-roll:
+Before post-motion recovery is considered, an 8.0 s clip with the default
+0.8 s pre-roll contributes:
 
 ```text
-0.8 s warm-up + 8.0 s motion
+0.8 s warm-up + 8.0 s recorded motion
+```
+
+With the current recovery defaults, the complete scheduled command is:
+
+```text
+0.8 s warm-up + 8.0 s motion + 1.0 s recovery + 0.4 s neutral hold
 ```
 
 The first full NPZ target frame is held for one control observation before the
 motion clock begins advancing.
 
-`command_finished` is disabled while `warmup_active` is true, which also makes
-random within-clip starts (`sampling_mode="uniform"`) safe.
+With `post_motion_behavior="recover"`, `command_finished` is emitted only after
+the recovery blend and neutral hold complete. Random within-clip starts
+(`sampling_mode="uniform"`) therefore remain safe as well.
 
 To disable pre-roll and recover the previous behavior:
 
 ```python
 teleop_cmd.warmup_duration_s = 0.0
 ```
+
+## Episode metrics, recovery, and exhaustive evaluation
+
+### True trajectory-level training metrics
+
+The command term now accumulates tracking error over the **recorded NPZ motion
+phase only**. Warm-up and post-motion recovery are intentionally excluded.
+At reset, TensorBoard receives both time-mean and max error for the completed
+episode:
+
+```text
+Metrics/teleop/episode_mean_left_wrist_pos_error
+Metrics/teleop/episode_max_left_wrist_pos_error
+Metrics/teleop/episode_mean_right_wrist_pos_error
+Metrics/teleop/episode_max_right_wrist_pos_error
+
+Metrics/teleop/episode_mean_left_wrist_ori_error
+Metrics/teleop/episode_max_left_wrist_ori_error
+Metrics/teleop/episode_mean_right_wrist_ori_error
+Metrics/teleop/episode_max_right_wrist_ori_error
+
+Metrics/teleop/episode_mean_shoulder_mid_xy_error
+Metrics/teleop/episode_max_shoulder_mid_xy_error
+Metrics/teleop/episode_mean_shoulder_heading_error
+Metrics/teleop/episode_max_shoulder_heading_error
+
+Metrics/teleop/episode_mean_left_shoulder_height_error
+Metrics/teleop/episode_max_left_shoulder_height_error
+Metrics/teleop/episode_mean_right_shoulder_height_error
+Metrics/teleop/episode_max_right_shoulder_height_error
+
+Metrics/teleop/episode_motion_completion_ratio
+Metrics/teleop/episode_motion_completed
+Metrics/teleop/episode_recovery_started
+Metrics/teleop/episode_recovery_completed
+Metrics/teleop/episode_tracking_steps
+Metrics/teleop/episode_motion_id
+```
+
+For every error quantity there is also an `episode_final_*` scalar. On a
+normal recovered episode this is the final neutral-hold error; on an early
+fall it is the last pre-reset error snapshot.
+
+The older `cmd_vs_sim_*` metrics are kept as instantaneous debug metrics.
+
+### Return-to-neutral recovery
+
+Training now defaults to:
+
+```python
+teleop_cmd.post_motion_behavior = "recover"
+teleop_cmd.recovery_duration_s = 1.0
+teleop_cmd.recovery_hold_s = 0.4
+teleop_cmd.recovery_profile = "smoothstep"
+```
+
+The full episode becomes:
+
+```text
+post-reset nominal task pose
+        │
+        ├── 0.8 s warm-up ──► NPZ first frame
+        │
+        ├── recorded NPZ trajectory
+        │
+        ├── 1.0 s recovery ─► nominal upright/arm pose
+        │                      at FINAL commanded shoulder XY/heading
+        └── 0.4 s neutral hold ─► command_finished
+```
+
+The nominal recovery **shape** is captured immediately after robot reset, but
+it is not forced back to the episode's original world position.  At the end of
+the motion, that nominal pose is rigidly yaw/XY transformed into the motion's
+**final commanded shoulder-mid XY and heading**.  Thus legitimate locomotion
+and turning are preserved, while wrist pose and shoulder heights return to the
+nominal upright/arm configuration.
+
+Crucially, this recovery target is computed entirely from the reset nominal
+pose plus the **commanded** final shoulder frame. It is **not** constructed
+from the robot's actual end state. Therefore ending a motion in a poor or
+contorted configuration cannot move the recovery target toward the robot and
+erase the recovery error.
+
+This is intended to discourage irreversible tracking shortcuts. Tracking
+rewards remain active during recovery, as do upright, joint-limit,
+self-collision, action-rate, and other physical terms.  In addition, a small
+`recovery_joint_posture` penalty (weight `-0.10`) is active only after the
+recorded trajectory ends; it pulls redundant joints toward the G1 default
+standing posture without constraining the motion-tracking phase itself.
+
+Available behaviors:
+
+```python
+# Old behavior: end as soon as the NPZ reaches its final frame.
+teleop_cmd.post_motion_behavior = "terminate"
+
+# Default: return to nominal, hold, then end episode.
+teleop_cmd.post_motion_behavior = "recover"
+
+# Continuous training: recover to nominal and then sample another NPZ without
+# resetting MuJoCo.  Useful later for long-horizon robustness training.
+teleop_cmd.post_motion_behavior = "recover_then_chain"
+```
+
+Interactive `play=True` uses `recover_then_chain` with motion 0, so the viewer
+repeats warm-up -> motion -> recovery without a physics reset.
+
+### Evaluate every motion once
+
+The package contains an exhaustive benchmark runner:
+
+```bash
+python -m src.tasks.teleop.tools.evaluate_all_motions \
+  --checkpoint-file logs/rsl_rl/g1_teleop_teacher/RUN/model_10000.pt \
+  --command-dir /absolute/path/to/all_npz \
+  --batch-size 32 \
+  --output-dir eval/model_10000
+```
+
+It recursively enumerates the same valid/sorted NPZ library used for training,
+assigns a distinct fixed motion id to each vectorized environment, and keeps
+batching until every motion has been executed once.
+
+Evaluation disables:
+
+```text
+actor observation corruption
+pushes
+friction randomization
+encoder bias randomization
+COM randomization
+random reset XY/yaw
+```
+
+and always uses:
+
+```text
+sampling_mode = start
+post_motion_behavior = recover
+loop = false
+```
+
+Outputs:
+
+```text
+eval/model_10000/
+├── per_motion.csv
+└── summary.json
+```
+
+`per_motion.csv` contains, for every NPZ:
+
+```text
+motion id / relative path / duration
+motion completion ratio
+motion completed
+recovery completed
+fell over
+tracking steps
+mean + max trajectory errors
+final recovery/neutral errors
+episode reward sum
+```
+
+`summary.json` contains equal-motion aggregate statistics plus the worst 20
+motions ranked by mean wrist-position error.

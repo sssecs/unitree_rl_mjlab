@@ -125,6 +125,10 @@ def make_teleop_env_cfg() -> ManagerBasedRlEnvCfg:
       sampling_mode="start",
       warmup_duration_s=0.8,
       warmup_profile="smoothstep",
+      post_motion_behavior="recover",
+      recovery_duration_s=1.0,
+      recovery_hold_s=0.4,
+      recovery_profile="smoothstep",
       loop=False,
     )
   }
@@ -256,6 +260,17 @@ def make_teleop_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=-0.75,
       params={
         "asset_cfg": SceneEntityCfg("robot", body_names=()),
+      },
+    ),
+    # Only active after the recorded trajectory ends.  This makes recovery
+    # converge toward the G1 nominal standing posture without constraining the
+    # redundancy used during the actual human-motion tracking phase.
+    "recovery_joint_posture": RewardTermCfg(
+      func=mdp.recovery_joint_posture_l2,
+      weight=-0.10,
+      params={
+        "command_name": "teleop",
+        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
       },
     ),
     "action_rate_l2": RewardTermCfg(

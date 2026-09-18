@@ -161,6 +161,30 @@ def body_orientation_l2(
   )
 
 
+def recovery_joint_posture_l2(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Nominal-joint posture penalty active only during post-motion recovery.
+
+  The trajectory itself remains free to use whole-body redundancy.  Once the
+  recorded motion ends, this term helps the sparse return command converge to
+  an ordinary standing configuration rather than a kinematically contorted
+  pose that happens to satisfy wrist/shoulder targets.
+  """
+  command = _command(env, command_name)
+  asset: Entity = env.scene[asset_cfg.name]
+  default_joint_pos = asset.data.default_joint_pos
+  assert default_joint_pos is not None
+
+  joint_ids = asset_cfg.joint_ids
+  joint_pos = asset.data.joint_pos[:, joint_ids]
+  default = default_joint_pos[:, joint_ids]
+  error = torch.mean(torch.square(joint_pos - default), dim=-1)
+  return error * command.recovery_started.to(error.dtype)
+
+
 def self_collision_cost(
   env: ManagerBasedRlEnv,
   sensor_name: str,

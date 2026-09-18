@@ -80,7 +80,10 @@ def unitree_g1_teleop_env_cfg(
     teleop_cmd.sampling_mode = "start"
     # Sorted recursive file order -> motion 0 is deterministic for viewer debug.
     teleop_cmd.fixed_motion_id = 0
-    teleop_cmd.loop = True
+    teleop_cmd.fixed_motion_ids = None
+    # Viewer repeatedly runs: warm-up -> motion -> recover -> same motion.
+    teleop_cmd.loop = False
+    teleop_cmd.post_motion_behavior = "recover_then_chain"
     cfg.terminations.pop("command_finished", None)
 
   return cfg

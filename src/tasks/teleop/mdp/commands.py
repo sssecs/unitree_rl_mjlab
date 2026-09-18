@@ -39,6 +39,17 @@ _SHOULDER_MID_ERROR_COLOR = (1.0, 0.85, 0.10, 0.95)
 _SHOULDER_HEIGHT_ERROR_COLOR = (0.20, 0.85, 0.85, 0.95)
 _SHOULDER_HEIGHT_TARGET_COLOR = (0.20, 0.85, 0.85, 0.75)
 
+_TRACKING_ERROR_NAMES = (
+  "left_wrist_pos_error",
+  "right_wrist_pos_error",
+  "left_wrist_ori_error",
+  "right_wrist_ori_error",
+  "shoulder_mid_xy_error",
+  "shoulder_heading_error",
+  "left_shoulder_height_error",
+  "right_shoulder_height_error",
+)
+
 
 
 def _yaw_quat_tensor(yaw: torch.Tensor) -> torch.Tensor:
@@ -244,6 +255,37 @@ class SparseWholeBodyCommand(CommandTerm):
       self.num_envs, dtype=torch.float32, device=self.device
     )
 
+    # Post-motion recovery state. Recovery drives the sparse task target to a
+    # nominal upright/arm pose at the MOTION'S FINAL shoulder-mid XY/heading.
+    # The nominal shape comes from the post-reset snapshot; only a deterministic
+    # SE(2) transform moves it to the final commanded body-placement frame.
+    # Nothing is derived from the actual robot state at motion end.
+    self.recovery_time = torch.zeros(
+      self.num_envs, dtype=torch.float32, device=self.device
+    )
+    self.recovery_started = torch.zeros(
+      self.num_envs, dtype=torch.bool, device=self.device
+    )
+
+    # Per-episode trajectory statistics.  These are accumulated ONLY during
+    # the actual NPZ tracking phase (warm-up and recovery are excluded), then
+    # finalized in reset() so TensorBoard receives true time-averaged/max
+    # errors rather than a single end-of-episode snapshot.
+    self._episode_tracking_steps = torch.zeros(
+      self.num_envs, dtype=torch.long, device=self.device
+    )
+    self._episode_error_sum = {
+      name: torch.zeros(self.num_envs, device=self.device)
+      for name in _TRACKING_ERROR_NAMES
+    }
+    self._episode_error_max = {
+      name: torch.zeros(self.num_envs, device=self.device)
+      for name in _TRACKING_ERROR_NAMES
+    }
+    self._episode_motion_start_time = torch.zeros(
+      self.num_envs, dtype=torch.float32, device=self.device
+    )
+
     metric_names = (
       "cmd_vs_sim_left_wrist_pos_error",
       "cmd_vs_sim_right_wrist_pos_error",
@@ -255,6 +297,27 @@ class SparseWholeBodyCommand(CommandTerm):
       "cmd_vs_sim_right_shoulder_height_error",
     )
     for name in metric_names:
+      self.metrics[name] = torch.zeros(self.num_envs, device=self.device)
+
+    for name in _TRACKING_ERROR_NAMES:
+      self.metrics[f"episode_mean_{name}"] = torch.zeros(
+        self.num_envs, device=self.device
+      )
+      self.metrics[f"episode_max_{name}"] = torch.zeros(
+        self.num_envs, device=self.device
+      )
+      self.metrics[f"episode_final_{name}"] = torch.zeros(
+        self.num_envs, device=self.device
+      )
+
+    for name in (
+      "episode_motion_completion_ratio",
+      "episode_motion_completed",
+      "episode_recovery_started",
+      "episode_recovery_completed",
+      "episode_tracking_steps",
+      "episode_motion_id",
+    ):
       self.metrics[name] = torch.zeros(self.num_envs, device=self.device)
 
     all_envs = torch.arange(
@@ -493,6 +556,57 @@ class SparseWholeBodyCommand(CommandTerm):
       )
     return self.warmup_time < (duration - 1.0e-8)
 
+  @property
+  def recovery_alpha(self) -> torch.Tensor:
+    """Blend factor from final NPZ target back to reset/neutral target."""
+    duration = float(self.cfg.recovery_duration_s)
+    alpha = torch.zeros(
+      self.num_envs, dtype=torch.float32, device=self.device
+    )
+    if duration <= 0.0:
+      alpha[self.recovery_started] = 1.0
+      return alpha
+
+    u = torch.clamp(self.recovery_time / duration, min=0.0, max=1.0)
+    if self.cfg.recovery_profile == "linear":
+      blended = u
+    elif self.cfg.recovery_profile == "smoothstep":
+      blended = u * u * (3.0 - 2.0 * u)
+    else:
+      raise ValueError(
+        f"Unknown recovery_profile={self.cfg.recovery_profile!r}; "
+        "expected 'linear' or 'smoothstep'."
+      )
+    alpha[self.recovery_started] = blended[self.recovery_started]
+    return alpha
+
+  @property
+  def recovery_active(self) -> torch.Tensor:
+    return self.recovery_started & (~self.recovery_done)
+
+  @property
+  def recovery_done(self) -> torch.Tensor:
+    total = float(self.cfg.recovery_duration_s + self.cfg.recovery_hold_s)
+    return self.recovery_started & (self.recovery_time >= total - 1.0e-8)
+
+  @property
+  def motion_tracking_active(self) -> torch.Tensor:
+    """True only while the policy is following the recorded NPZ trajectory."""
+    return (
+      (~self._alignment_pending)
+      & (~self.warmup_active)
+      & (~self.recovery_started)
+    )
+
+  @property
+  def motion_completion_ratio(self) -> torch.Tensor:
+    """Fraction of the selected trajectory traversed since its sampled start."""
+    start = self._episode_motion_start_time
+    duration = self.current_motion_duration
+    denom = torch.clamp(duration - start, min=1.0e-6)
+    ratio = (self.command_time - start) / denom
+    return torch.clamp(ratio, min=0.0, max=1.0)
+
   def _warmup_lerp(
     self,
     start: torch.Tensor,
@@ -502,6 +616,16 @@ class SparseWholeBodyCommand(CommandTerm):
     while alpha.ndim < target.ndim:
       alpha = alpha.unsqueeze(-1)
     return start + alpha * (target - start)
+
+  def _recovery_lerp(
+    self,
+    target: torch.Tensor,
+    neutral: torch.Tensor,
+  ) -> torch.Tensor:
+    alpha = self.recovery_alpha
+    while alpha.ndim < target.ndim:
+      alpha = alpha.unsqueeze(-1)
+    return target + alpha * (neutral - target)
 
   # ---------------------- fixed-aligned NPZ reference ------------------
 
@@ -549,13 +673,85 @@ class SparseWholeBodyCommand(CommandTerm):
   def aligned_npz_shoulder_heading_w(self) -> torch.Tensor:
     return self._npz_shoulder_heading_cw + self.episode_align_yaw
 
+  # ---------------- recovery neutral at final body placement -----------
+
+  @property
+  def recovery_neutral_yaw_delta_w(self) -> torch.Tensor:
+    """Yaw taking the reset nominal shoulder frame to the final command frame."""
+    delta = (
+      self.aligned_npz_shoulder_heading_w
+      - self._warmup_start_shoulder_heading_w
+    )
+    return torch.atan2(torch.sin(delta), torch.cos(delta))
+
+  def _reset_nominal_pos_to_final_body_frame(
+    self,
+    reset_pos_ew: torch.Tensor,
+  ) -> torch.Tensor:
+    """Move a reset nominal point to final commanded shoulder XY/heading."""
+    rel_xy = (
+      reset_pos_ew[:, :2]
+      - self._warmup_start_shoulder_mid_xy_ew
+    )
+    rotated_rel_xy = _rotate_xy(
+      rel_xy,
+      self.recovery_neutral_yaw_delta_w,
+    )
+    out = reset_pos_ew.clone()
+    out[:, :2] = self.aligned_npz_shoulder_mid_xy_ew + rotated_rel_xy
+    # z remains the nominal reset height above the environment ground.
+    return out
+
+  @property
+  def recovery_neutral_left_wrist_pos_ew(self) -> torch.Tensor:
+    return self._reset_nominal_pos_to_final_body_frame(
+      self._warmup_start_left_wrist_pos_ew
+    )
+
+  @property
+  def recovery_neutral_right_wrist_pos_ew(self) -> torch.Tensor:
+    return self._reset_nominal_pos_to_final_body_frame(
+      self._warmup_start_right_wrist_pos_ew
+    )
+
+  @property
+  def recovery_neutral_left_wrist_quat_w(self) -> torch.Tensor:
+    return quat_mul(
+      _yaw_quat_tensor(self.recovery_neutral_yaw_delta_w),
+      self._warmup_start_left_wrist_quat_w,
+    )
+
+  @property
+  def recovery_neutral_right_wrist_quat_w(self) -> torch.Tensor:
+    return quat_mul(
+      _yaw_quat_tensor(self.recovery_neutral_yaw_delta_w),
+      self._warmup_start_right_wrist_quat_w,
+    )
+
+  @property
+  def recovery_neutral_shoulder_mid_xy_ew(self) -> torch.Tensor:
+    # Preserve the motion's final translation. Recovery is not "walk home".
+    return self.aligned_npz_shoulder_mid_xy_ew
+
+  @property
+  def recovery_neutral_shoulder_heading_w(self) -> torch.Tensor:
+    # Preserve the motion's final heading while restoring nominal posture.
+    return self.aligned_npz_shoulder_heading_w
+
   # ----------------------- emitted command target ----------------------
 
   @property
-  def cmd_left_wrist_pos_ew(self) -> torch.Tensor:
+  def _pre_recovery_left_wrist_pos_ew(self) -> torch.Tensor:
     return self._warmup_lerp(
       self._warmup_start_left_wrist_pos_ew,
       self.aligned_npz_left_wrist_pos_ew,
+    )
+
+  @property
+  def cmd_left_wrist_pos_ew(self) -> torch.Tensor:
+    return self._recovery_lerp(
+      self._pre_recovery_left_wrist_pos_ew,
+      self.recovery_neutral_left_wrist_pos_ew,
     )
 
   @property
@@ -563,7 +759,7 @@ class SparseWholeBodyCommand(CommandTerm):
     return self.cmd_left_wrist_pos_ew + self._env.scene.env_origins
 
   @property
-  def cmd_left_wrist_quat_w(self) -> torch.Tensor:
+  def _pre_recovery_left_wrist_quat_w(self) -> torch.Tensor:
     return _quat_nlerp_shortest(
       self._warmup_start_left_wrist_quat_w,
       self.aligned_npz_left_wrist_quat_w,
@@ -571,10 +767,25 @@ class SparseWholeBodyCommand(CommandTerm):
     )
 
   @property
-  def cmd_right_wrist_pos_ew(self) -> torch.Tensor:
+  def cmd_left_wrist_quat_w(self) -> torch.Tensor:
+    return _quat_nlerp_shortest(
+      self._pre_recovery_left_wrist_quat_w,
+      self.recovery_neutral_left_wrist_quat_w,
+      self.recovery_alpha,
+    )
+
+  @property
+  def _pre_recovery_right_wrist_pos_ew(self) -> torch.Tensor:
     return self._warmup_lerp(
       self._warmup_start_right_wrist_pos_ew,
       self.aligned_npz_right_wrist_pos_ew,
+    )
+
+  @property
+  def cmd_right_wrist_pos_ew(self) -> torch.Tensor:
+    return self._recovery_lerp(
+      self._pre_recovery_right_wrist_pos_ew,
+      self.recovery_neutral_right_wrist_pos_ew,
     )
 
   @property
@@ -582,7 +793,7 @@ class SparseWholeBodyCommand(CommandTerm):
     return self.cmd_right_wrist_pos_ew + self._env.scene.env_origins
 
   @property
-  def cmd_right_wrist_quat_w(self) -> torch.Tensor:
+  def _pre_recovery_right_wrist_quat_w(self) -> torch.Tensor:
     return _quat_nlerp_shortest(
       self._warmup_start_right_wrist_quat_w,
       self.aligned_npz_right_wrist_quat_w,
@@ -590,10 +801,25 @@ class SparseWholeBodyCommand(CommandTerm):
     )
 
   @property
-  def cmd_shoulder_mid_xy_ew(self) -> torch.Tensor:
+  def cmd_right_wrist_quat_w(self) -> torch.Tensor:
+    return _quat_nlerp_shortest(
+      self._pre_recovery_right_wrist_quat_w,
+      self.recovery_neutral_right_wrist_quat_w,
+      self.recovery_alpha,
+    )
+
+  @property
+  def _pre_recovery_shoulder_mid_xy_ew(self) -> torch.Tensor:
     return self._warmup_lerp(
       self._warmup_start_shoulder_mid_xy_ew,
       self.aligned_npz_shoulder_mid_xy_ew,
+    )
+
+  @property
+  def cmd_shoulder_mid_xy_ew(self) -> torch.Tensor:
+    return self._recovery_lerp(
+      self._pre_recovery_shoulder_mid_xy_ew,
+      self.recovery_neutral_shoulder_mid_xy_ew,
     )
 
   @property
@@ -604,22 +830,35 @@ class SparseWholeBodyCommand(CommandTerm):
     )
 
   @property
-  def cmd_left_shoulder_height(self) -> torch.Tensor:
+  def _pre_recovery_left_shoulder_height(self) -> torch.Tensor:
     return self._warmup_lerp(
       self._warmup_start_left_shoulder_height,
       self.aligned_npz_left_shoulder_height,
     )
 
   @property
-  def cmd_right_shoulder_height(self) -> torch.Tensor:
+  def cmd_left_shoulder_height(self) -> torch.Tensor:
+    return self._recovery_lerp(
+      self._pre_recovery_left_shoulder_height,
+      self._warmup_start_left_shoulder_height,
+    )
+
+  @property
+  def _pre_recovery_right_shoulder_height(self) -> torch.Tensor:
     return self._warmup_lerp(
       self._warmup_start_right_shoulder_height,
       self.aligned_npz_right_shoulder_height,
     )
 
   @property
-  def cmd_shoulder_heading_w(self) -> torch.Tensor:
-    # Interpolate the shortest wrapped yaw displacement.
+  def cmd_right_shoulder_height(self) -> torch.Tensor:
+    return self._recovery_lerp(
+      self._pre_recovery_right_shoulder_height,
+      self._warmup_start_right_shoulder_height,
+    )
+
+  @property
+  def _pre_recovery_shoulder_heading_w(self) -> torch.Tensor:
     start = self._warmup_start_shoulder_heading_w
     target = self.aligned_npz_shoulder_heading_w
     delta = torch.atan2(
@@ -627,6 +866,16 @@ class SparseWholeBodyCommand(CommandTerm):
       torch.cos(target - start),
     )
     return start + self.warmup_alpha * delta
+
+  @property
+  def cmd_shoulder_heading_w(self) -> torch.Tensor:
+    target = self._pre_recovery_shoulder_heading_w
+    neutral = self.recovery_neutral_shoulder_heading_w
+    delta = torch.atan2(
+      torch.sin(neutral - target),
+      torch.cos(neutral - target),
+    )
+    return target + self.recovery_alpha * delta
 
   @property
   def cmd_shoulder_heading_vec_w(self) -> torch.Tensor:
@@ -677,7 +926,23 @@ class SparseWholeBodyCommand(CommandTerm):
     if len(env_ids) == 0:
       return
 
-    if self.cfg.fixed_motion_id is None:
+    if self.cfg.fixed_motion_ids is not None:
+      fixed_ids = torch.tensor(
+        self.cfg.fixed_motion_ids, dtype=torch.long, device=self.device
+      )
+      if fixed_ids.numel() != self.num_envs:
+        raise ValueError(
+          "fixed_motion_ids must contain exactly one motion id per env: "
+          f"got {fixed_ids.numel()} ids for {self.num_envs} envs"
+        )
+      sampled_motion_ids = fixed_ids[env_ids]
+      if torch.any(sampled_motion_ids < 0) or torch.any(
+        sampled_motion_ids >= self.motion.num_motions
+      ):
+        raise ValueError(
+          f"fixed_motion_ids must be inside [0, {self.motion.num_motions - 1}]"
+        )
+    elif self.cfg.fixed_motion_id is None:
       sampled_motion_ids = self.motion.sample_motion_ids(len(env_ids))
     else:
       fixed = int(self.cfg.fixed_motion_id)
@@ -704,59 +969,120 @@ class SparseWholeBodyCommand(CommandTerm):
     else:
       raise ValueError(f"Unknown sampling_mode: {self.cfg.sampling_mode}")
 
+    self._episode_motion_start_time[env_ids] = self.command_time[env_ids]
     self._update_npz_targets(env_ids)
     self.warmup_time[env_ids] = 0.0
+    self.recovery_time[env_ids] = 0.0
+    self.recovery_started[env_ids] = False
     self._alignment_pending[env_ids] = True
 
-  def _update_command(self):
-    """Advance warm-up first, then advance the selected NPZ motion clock.
+  def _sample_chained_motion(self, env_ids: torch.Tensor) -> None:
+    """Start another clip without resetting the robot/environment."""
+    if len(env_ids) == 0:
+      return
 
-    The reference motion itself is frozen throughout pre-roll.  This means the
-    robot is not asked to "catch a moving train": it first reaches the selected
-    clip's starting reference, and only then does command_time progress.
-    """
+    if self.cfg.fixed_motion_ids is not None:
+      fixed_ids = torch.tensor(
+        self.cfg.fixed_motion_ids, dtype=torch.long, device=self.device
+      )
+      new_ids = fixed_ids[env_ids]
+    elif self.cfg.fixed_motion_id is not None:
+      new_ids = torch.full(
+        (len(env_ids),),
+        int(self.cfg.fixed_motion_id),
+        dtype=torch.long,
+        device=self.device,
+      )
+    else:
+      new_ids = self.motion.sample_motion_ids(len(env_ids))
+
+    self.motion_ids[env_ids] = new_ids
+    self.command_time[env_ids] = 0.0
+    self._episode_motion_start_time[env_ids] = 0.0
+    self._update_npz_targets(env_ids)
+    self.warmup_time[env_ids] = 0.0
+    self.recovery_time[env_ids] = 0.0
+    self.recovery_started[env_ids] = False
+
+    # _update_command() is called after mjlab's post-step forward(), so current
+    # derived body kinematics are valid here.  Align the next clip immediately.
+    self._alignment_pending[env_ids] = True
+    self._compute_episode_alignment(env_ids)
+
+  def _update_command(self):
+    """Advance the warm-up -> motion -> recovery state machine."""
     pending_before = self._alignment_pending.clone()
 
-    # On mjlab v1.2 auto-reset, command compute runs after reset forward().
-    # Resolve alignment now, but preserve alpha=0 for this first observation.
     if torch.any(pending_before):
       self._compute_episode_alignment(
         pending_before.nonzero(as_tuple=False).flatten()
       )
 
     dt = float(self._env.step_dt)
-    duration = float(self.cfg.warmup_duration_s)
 
-    if duration > 0.0:
-      # Decide based on the PRE-update warm-up state.  If this step reaches
-      # alpha=1, command_time still remains frozen at the NPZ start frame.
-      # The following step begins normal motion playback.
-      warmup_before = self.warmup_time < (duration - 1.0e-8)
+    # In continuous mode, a completed recovery gets one full observation at
+    # the neutral target, then the following command update starts a new clip.
+    if self.cfg.post_motion_behavior == "recover_then_chain":
+      chain_ids = self.recovery_done.nonzero(as_tuple=False).flatten()
+      if len(chain_ids) > 0:
+        self._sample_chained_motion(chain_ids)
+        # These envs now start at warm-up alpha=0; do not advance again below.
+        pending_before = pending_before.clone()
+        pending_before[chain_ids] = True
+
+    warmup_duration = float(self.cfg.warmup_duration_s)
+    if warmup_duration > 0.0:
+      warmup_before = self.warmup_time < (warmup_duration - 1.0e-8)
       advance_warmup = (~pending_before) & warmup_before
-
       self.warmup_time[advance_warmup] = torch.clamp(
         self.warmup_time[advance_warmup] + dt,
-        max=duration,
+        max=warmup_duration,
       )
-
-      advance_motion = (~pending_before) & (~warmup_before)
+      ready_for_motion = (~pending_before) & (~warmup_before)
     else:
-      advance_motion = ~pending_before
+      ready_for_motion = ~pending_before
 
-    self.command_time[advance_motion] += dt
+    # Recovery envs do not advance the NPZ clock.
+    ready_for_motion &= ~self.recovery_started
 
     motion_durations = self.current_motion_duration
     if self.cfg.loop:
-      positive = advance_motion & (motion_durations > 0.0)
+      # Legacy debug behavior: loop raw motion with no recovery.
+      self.command_time[ready_for_motion] += dt
+      positive = ready_for_motion & (motion_durations > 0.0)
       self.command_time[positive] = torch.remainder(
-        self.command_time[positive],
-        motion_durations[positive],
+        self.command_time[positive], motion_durations[positive]
       )
     else:
-      self.command_time[advance_motion] = torch.minimum(
-        self.command_time[advance_motion],
-        motion_durations[advance_motion],
+      self.command_time[ready_for_motion] = torch.minimum(
+        self.command_time[ready_for_motion] + dt,
+        motion_durations[ready_for_motion],
       )
+
+      reached_end = ready_for_motion & (
+        self.command_time >= motion_durations - 1.0e-8
+      )
+      if self.cfg.post_motion_behavior in ("recover", "recover_then_chain"):
+        self.recovery_started[reached_end] = True
+        self.recovery_time[reached_end] = 0.0
+
+    # Advance only recovery phases that were already active before this update,
+    # so the final NPZ frame is held for one observation at recovery alpha=0.
+    recovery_before = self.recovery_started & (~self.recovery_done)
+    newly_started = ready_for_motion & (
+      self.command_time >= motion_durations - 1.0e-8
+    )
+    advance_recovery = recovery_before & (~newly_started)
+    recovery_total = float(
+      self.cfg.recovery_duration_s + self.cfg.recovery_hold_s
+    )
+    if recovery_total > 0.0:
+      self.recovery_time[advance_recovery] = torch.clamp(
+        self.recovery_time[advance_recovery] + dt,
+        max=recovery_total,
+      )
+    else:
+      self.recovery_time[advance_recovery] = 0.0
 
     env_ids = torch.arange(
       self.num_envs, dtype=torch.long, device=self.device
@@ -790,50 +1116,121 @@ class SparseWholeBodyCommand(CommandTerm):
     self._npz_right_shoulder_height[env_ids] = right_h
     self._npz_shoulder_heading_cw[env_ids] = heading
 
-  def _update_metrics(self):
-    pending = self._alignment_pending
-
-    metric_values = {
-      "cmd_vs_sim_left_wrist_pos_error": torch.linalg.vector_norm(
+  def current_tracking_errors(self) -> dict[str, torch.Tensor]:
+    """Current absolute command-vs-simulation task-space errors."""
+    return {
+      "left_wrist_pos_error": torch.linalg.vector_norm(
         self.cmd_left_wrist_pos_w - self.sim_left_wrist_pos_w,
         dim=-1,
       ),
-      "cmd_vs_sim_right_wrist_pos_error": torch.linalg.vector_norm(
+      "right_wrist_pos_error": torch.linalg.vector_norm(
         self.cmd_right_wrist_pos_w - self.sim_right_wrist_pos_w,
         dim=-1,
       ),
-      "cmd_vs_sim_left_wrist_ori_error": quat_error_magnitude(
+      "left_wrist_ori_error": quat_error_magnitude(
         self.cmd_left_wrist_quat_w,
         self.sim_left_wrist_quat_w,
       ),
-      "cmd_vs_sim_right_wrist_ori_error": quat_error_magnitude(
+      "right_wrist_ori_error": quat_error_magnitude(
         self.cmd_right_wrist_quat_w,
         self.sim_right_wrist_quat_w,
       ),
-      "cmd_vs_sim_shoulder_mid_xy_error": torch.linalg.vector_norm(
+      "shoulder_mid_xy_error": torch.linalg.vector_norm(
         self.cmd_shoulder_mid_xy_w
         - self.sim_shoulder_mid_pos_w[:, :2],
         dim=-1,
       ),
-      "cmd_vs_sim_shoulder_heading_error": quat_error_magnitude(
+      "shoulder_heading_error": quat_error_magnitude(
         _yaw_quat_tensor(self.cmd_shoulder_heading_w),
         self.sim_shoulder_yaw_quat_w,
       ),
-      "cmd_vs_sim_left_shoulder_height_error": torch.abs(
+      "left_shoulder_height_error": torch.abs(
         self.cmd_left_shoulder_height
         - self.sim_left_shoulder_height
       ),
-      "cmd_vs_sim_right_shoulder_height_error": torch.abs(
+      "right_shoulder_height_error": torch.abs(
         self.cmd_right_shoulder_height
         - self.sim_right_shoulder_height
       ),
     }
 
-    for name, value in metric_values.items():
+  def _update_metrics(self):
+    errors = self.current_tracking_errors()
+    pending = self._alignment_pending
+
+    # Preserve the instantaneous metrics for quick debugging.
+    for short_name, value in errors.items():
+      value_for_log = value
       if torch.any(pending):
-        value = value.clone()
-        value[pending] = 0.0
-      self.metrics[name] = value
+        value_for_log = value.clone()
+        value_for_log[pending] = 0.0
+      self.metrics[f"cmd_vs_sim_{short_name}"] = value_for_log
+
+    # True episode statistics: integrate only the recorded-motion phase.
+    active = self.motion_tracking_active
+    active_f = active.to(torch.float32)
+    self._episode_tracking_steps += active.to(torch.long)
+    for name, value in errors.items():
+      self._episode_error_sum[name] += value * active_f
+      self._episode_error_max[name] = torch.where(
+        active,
+        torch.maximum(self._episode_error_max[name], value),
+        self._episode_error_max[name],
+      )
+
+  def _finalize_episode_metrics(self, env_ids: torch.Tensor) -> None:
+    if len(env_ids) == 0:
+      return
+
+    steps = self._episode_tracking_steps[env_ids]
+    denom = torch.clamp(steps, min=1).to(torch.float32)
+    for name in _TRACKING_ERROR_NAMES:
+      mean = self._episode_error_sum[name][env_ids] / denom
+      mean = torch.where(steps > 0, mean, torch.zeros_like(mean))
+      self.metrics[f"episode_mean_{name}"][env_ids] = mean
+      self.metrics[f"episode_max_{name}"][env_ids] = (
+        self._episode_error_max[name][env_ids]
+      )
+
+    final_errors = self.current_tracking_errors()
+    for name in _TRACKING_ERROR_NAMES:
+      self.metrics[f"episode_final_{name}"][env_ids] = final_errors[name][env_ids]
+
+    completion = self.motion_completion_ratio[env_ids]
+    self.metrics["episode_motion_completion_ratio"][env_ids] = completion
+    self.metrics["episode_motion_completed"][env_ids] = (
+      completion >= 1.0 - 1.0e-6
+    ).to(torch.float32)
+
+    self.metrics["episode_recovery_started"][env_ids] = self.recovery_started[
+      env_ids
+    ].to(torch.float32)
+    if self.cfg.post_motion_behavior in ("recover", "recover_then_chain"):
+      recovered = self.recovery_done[env_ids]
+    else:
+      recovered = completion >= 1.0 - 1.0e-6
+    self.metrics["episode_recovery_completed"][env_ids] = recovered.to(
+      torch.float32
+    )
+    self.metrics["episode_tracking_steps"][env_ids] = steps.to(torch.float32)
+    self.metrics["episode_motion_id"][env_ids] = self.motion_ids[env_ids].to(
+      torch.float32
+    )
+
+  def _clear_episode_accumulators(self, env_ids: torch.Tensor) -> None:
+    if len(env_ids) == 0:
+      return
+    self._episode_tracking_steps[env_ids] = 0
+    for name in _TRACKING_ERROR_NAMES:
+      self._episode_error_sum[name][env_ids] = 0.0
+      self._episode_error_max[name][env_ids] = 0.0
+
+  def reset(self, env_ids: torch.Tensor | None) -> dict[str, float]:
+    assert isinstance(env_ids, torch.Tensor)
+    self._finalize_episode_metrics(env_ids)
+    extras = super().reset(env_ids)
+    self._clear_episode_accumulators(env_ids)
+    return extras
 
   # -----------------------------------------------------------------------
   # Viewer debugging.
@@ -1034,6 +1431,8 @@ class SparseWholeBodyCommandCfg(CommandTermCfg):
   skip_invalid_files: bool = True
   motion_sampling_weight_mode: Literal["uniform", "duration"] = "uniform"
   fixed_motion_id: int | None = None
+  # Evaluation can pin a different motion id to every vectorized environment.
+  fixed_motion_ids: tuple[int, ...] | None = None
 
   entity_name: str = "robot"
 
@@ -1051,6 +1450,18 @@ class SparseWholeBodyCommandCfg(CommandTermCfg):
   # Set to 0.0 to recover the previous hard-start behavior.
   warmup_duration_s: float = 0.8
   warmup_profile: Literal["linear", "smoothstep"] = "smoothstep"
+
+  # What happens after the recorded trajectory reaches its final frame.
+  # ``recover`` is the training default: smoothly return to the post-reset
+  # neutral task-space pose, hold it briefly, then end the episode.
+  # ``recover_then_chain`` keeps the environment alive and samples another
+  # clip after recovery instead of resetting the physics state.
+  post_motion_behavior: Literal[
+    "terminate", "recover", "recover_then_chain"
+  ] = "recover"
+  recovery_duration_s: float = 1.0
+  recovery_hold_s: float = 0.4
+  recovery_profile: Literal["linear", "smoothstep"] = "smoothstep"
 
   @dataclass
   class VizCfg:
