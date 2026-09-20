@@ -38,59 +38,86 @@ def make_teleop_env_cfg(
   #   3) explicit CURRENT target-minus-sim vector errors
   #
   # The explicit error is causal: it never indexes a future NPZ frame.
-  # Observation history contains only current/past samples.
+  #
+  # Structured history:
+  #   - task/reference information is CURRENT only; repeating it 25 times is
+  #     redundant because the current explicit error already closes the loop.
+  #   - proprioception and the previous action keep ``history_length`` frames
+  #     so the policy still has temporal context for dynamics/contact inference.
+  #
+  # With G1 (29 DoF) and history_length=25 this gives:
+  #   actor  = 84 current task dims + 25 * 93 proprio/action dims = 2409
+  #   critic = actor + 3 current base-linear-velocity + 8 task scalars = 2420
   # -----------------------------------------------------------------------
 
   actor_terms = {
+    # Current task/reference branch: no history.
     "command_absolute": ObservationTermCfg(
       func=mdp.generated_commands,
       params={"command_name": "teleop"},
+      history_length=0,
     ),
     "sim_task_state_absolute": ObservationTermCfg(
       func=mdp.sim_task_state_absolute,
       params={"command_name": "teleop"},
+      history_length=0,
     ),
     "command_wrist_lin_vel_absolute": ObservationTermCfg(
       func=mdp.command_wrist_linear_velocity_absolute,
       params={"command_name": "teleop"},
+      history_length=0,
     ),
     "sim_wrist_lin_vel_absolute": ObservationTermCfg(
       func=mdp.sim_wrist_linear_velocity_absolute,
       params={"command_name": "teleop"},
+      history_length=0,
     ),
     "task_error_vector": ObservationTermCfg(
       func=mdp.teleop_explicit_vector_errors,
       params={"command_name": "teleop"},
+      history_length=0,
     ),
+
+    # Dynamics branch: retain causal temporal context.
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_ang_vel"},
       noise=Unoise(n_min=-0.2, n_max=0.2),
+      history_length=history_length,
     ),
     "projected_gravity": ObservationTermCfg(
       func=mdp.projected_gravity,
       noise=Unoise(n_min=-0.05, n_max=0.05),
+      history_length=history_length,
     ),
     "joint_pos": ObservationTermCfg(
       func=mdp.joint_pos_rel,
       noise=Unoise(n_min=-0.01, n_max=0.01),
+      history_length=history_length,
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
       noise=Unoise(n_min=-0.5, n_max=0.5),
+      history_length=history_length,
     ),
-    "actions": ObservationTermCfg(func=mdp.last_action),
+    "actions": ObservationTermCfg(
+      func=mdp.last_action,
+      history_length=history_length,
+    ),
   }
 
   critic_terms = {
     **actor_terms,
+    # Privileged critic-only terms are current-state summaries, not histories.
     "base_lin_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_lin_vel"},
+      history_length=0,
     ),
     "task_errors": ObservationTermCfg(
       func=mdp.teleop_tracking_errors,
       params={"command_name": "teleop"},
+      history_length=0,
     ),
   }
 
@@ -99,13 +126,15 @@ def make_teleop_env_cfg(
       terms=actor_terms,
       concatenate_terms=True,
       enable_corruption=True,
-      history_length=history_length,
+      # Important: do not set a group-level history override here.  Each term
+      # controls its own history_length above.
+      history_length=None,
     ),
     "critic": ObservationGroupCfg(
       terms=critic_terms,
       concatenate_terms=True,
       enable_corruption=False,
-      history_length=history_length,
+      history_length=None,
     ),
   }
 
@@ -138,14 +167,14 @@ def make_teleop_env_cfg(
       motion_sampling_weight_mode="uniform",
       fixed_motion_id=None,
       resampling_time_range=(1.0e9, 1.0e9),
-      debug_vis=True,
+      debug_vis=False,
       canonicalize_heading=False,
       sampling_mode="start",
-      warmup_duration_s=0.8,
+      warmup_duration_s=0.4,
       warmup_profile="smoothstep",
       post_motion_behavior="recover",
-      recovery_duration_s=1.0,
-      recovery_hold_s=0.4,
+      recovery_duration_s=0.5,
+      recovery_hold_s=0.1,
       recovery_profile="smoothstep",
       loop=False,
     )

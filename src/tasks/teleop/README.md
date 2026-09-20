@@ -355,7 +355,7 @@ nominal reset pose to the NPZ target.
 Default:
 
 ```python
-teleop_cmd.warmup_duration_s = 0.8
+teleop_cmd.warmup_duration_s = 0.4
 teleop_cmd.warmup_profile = "smoothstep"
 ```
 
@@ -510,8 +510,8 @@ Training now defaults to:
 
 ```python
 teleop_cmd.post_motion_behavior = "recover"
-teleop_cmd.recovery_duration_s = 1.0
-teleop_cmd.recovery_hold_s = 0.4
+teleop_cmd.recovery_duration_s = 0.5
+teleop_cmd.recovery_hold_s = 0.1
 teleop_cmd.recovery_profile = "smoothstep"
 ```
 
@@ -697,9 +697,10 @@ human-like trunk motion during low-object manipulation.  In particular, V7
 does **not** penalize forward trunk pitch or lateral trunk roll during the
 recorded motion phase.
 
-The primary task rewards, observations, command interface, action space, and
-25-frame history are unchanged from v6.  Therefore the actor/critic observation
-shapes are unchanged and v6 checkpoints remain shape-compatible for fine-tuning.
+The base V7 posture change itself did not alter the command/action interface.
+The **current Fast-V7 structured-history variant below does change observation
+shape**, so the old v6/v7 checkpoint compatibility statement no longer applies
+to this packaged variant.
 
 Stability is still constrained by task tracking and physical terms: shoulder
 height/heading tracking, wrist tracking, joint limits, foot slip, unwanted
@@ -722,6 +723,57 @@ Metrics/teleop/episode_max_shoulder_height_delta_error
 `|(cmd_left_h-cmd_right_h) - (sim_left_h-sim_right_h)|`, which directly checks
 whether the shoulder-height task signal is sufficient to regulate the lateral
 body configuration without an explicit roll reward.
+
+
+## Fast-V7 structured history
+
+The current Fast-V7 package uses **per-term structured history** rather than
+stacking the entire 177-D observation 25 times.  Task/reference quantities stay
+current-only, while only the dynamics-relevant proprioception/action branch
+keeps temporal context.
+
+Current-only branch (84 D):
+
+```text
+command_absolute                       24
+sim_task_state_absolute                 24
+command_wrist_lin_vel_absolute           6
+sim_wrist_lin_vel_absolute               6
+task_error_vector                       24
+                                         --
+                                         84
+```
+
+25-frame dynamics branch (93 D/frame):
+
+```text
+base_ang_vel                             3
+projected_gravity                        3
+joint_pos                               29
+joint_vel                               29
+previous action                         29
+                                         --
+                                         93
+```
+
+Therefore, with `history_length=25`:
+
+```text
+actor  = 84 + 25 * 93 = 2409
+critic = 2409 + 3 current base_lin_vel + 8 current task scalars = 2420
+```
+
+The 25 frames still cover about 0.5 s at the 50 Hz control rate, but task
+commands and explicit errors are no longer redundantly repeated through the
+history buffer.  MjLab's per-term `ObservationTermCfg.history_length` is used;
+the observation group itself has `history_length=None` so it does not override
+individual term settings.
+
+**Checkpoint compatibility:** this changes the actor and critic input widths.
+V6/V7 checkpoints trained with the old `4425/4700` observation widths cannot be
+loaded directly into this structured-history network without remapping the first
+layer (and observation normalizer).  Train this variant fresh unless a dedicated
+checkpoint-conversion step is used.
 
 
 ## v5.1 evaluator performance fix

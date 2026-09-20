@@ -121,11 +121,16 @@ def unitree_g1_teleop_env_cfg(
   cfg.sim.contact_sensor_maxmatch = 128
   cfg.viewer.body_name = "torso_link"
 
+  # Fast-V7 posture-learning stage: do not spend on-policy samples on external
+  # push recovery while learning the newly released torso/posture redundancy.
+  # Re-enable this event for the later robustness fine-tuning stage.
+  cfg.events.pop("push_robot", None)
+
   if play:
+    # Debug markers are useful in the viewer, but are disabled during training.
+    teleop_cmd.debug_vis = True
     cfg.episode_length_s = int(1e9)
     cfg.observations["actor"].enable_corruption = False
-    cfg.events.pop("push_robot", None)
-
     # Deterministic initial placement is easier to inspect in the viewer.
     reset_pose = cfg.events["reset_base"].params["pose_range"]
     reset_pose["x"] = (0.0, 0.0)
