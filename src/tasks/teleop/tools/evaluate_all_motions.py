@@ -50,6 +50,12 @@ ERROR_NAMES = (
 )
 
 
+POSTURE_NAMES = (
+  "torso_tilt",
+  "shoulder_height_delta_error",
+)
+
+
 def _pad_batch(ids: list[int], batch_size: int) -> list[int]:
   if not ids:
     raise ValueError("Cannot pad an empty motion batch")
@@ -307,6 +313,15 @@ def main() -> None:
     last_error = {
       name: torch.zeros(batch_size, device=device) for name in ERROR_NAMES
     }
+    posture_sum = {
+      name: torch.zeros(batch_size, device=device) for name in POSTURE_NAMES
+    }
+    posture_max = {
+      name: torch.zeros(batch_size, device=device) for name in POSTURE_NAMES
+    }
+    last_posture = {
+      name: torch.zeros(batch_size, device=device) for name in POSTURE_NAMES
+    }
     max_completion = torch.zeros(batch_size, device=device)
     max_recovery_alpha = torch.zeros(batch_size, device=device)
     reward_sum = torch.zeros(batch_size, device=device)
@@ -393,6 +408,38 @@ def main() -> None:
         error_max[name] = error_max_mat[metric_index]
         last_error[name] = last_error_mat[metric_index]
 
+      # V7 posture diagnostics are evaluated over the same recorded-motion
+      # phase as task errors, but never contribute to reward.
+      posture_dict = command.current_posture_diagnostics()
+      posture_mat = torch.stack(
+        [posture_dict[name] for name in POSTURE_NAMES],
+        dim=0,
+      )
+      posture_sum_mat = torch.stack(
+        [posture_sum[name] for name in POSTURE_NAMES], dim=0
+      )
+      posture_max_mat = torch.stack(
+        [posture_max[name] for name in POSTURE_NAMES], dim=0
+      )
+      last_posture_mat = torch.stack(
+        [last_posture[name] for name in POSTURE_NAMES], dim=0
+      )
+      posture_sum_mat += posture_mat * track_f.unsqueeze(0)
+      posture_max_mat = torch.where(
+        track_mask.unsqueeze(0),
+        torch.maximum(posture_max_mat, posture_mat),
+        posture_max_mat,
+      )
+      last_posture_mat = torch.where(
+        active_env.unsqueeze(0),
+        posture_mat,
+        last_posture_mat,
+      )
+      for metric_index, name in enumerate(POSTURE_NAMES):
+        posture_sum[name] = posture_sum_mat[metric_index]
+        posture_max[name] = posture_max_mat[metric_index]
+        last_posture[name] = last_posture_mat[metric_index]
+
       max_completion = torch.maximum(
         max_completion,
         command.motion_completion_ratio * active_f,
@@ -463,6 +510,18 @@ def main() -> None:
       name: last_error[name][:valid_count].detach().cpu().numpy()
       for name in ERROR_NAMES
     }
+    posture_sum_cpu = {
+      name: posture_sum[name][:valid_count].detach().cpu().numpy()
+      for name in POSTURE_NAMES
+    }
+    posture_max_cpu = {
+      name: posture_max[name][:valid_count].detach().cpu().numpy()
+      for name in POSTURE_NAMES
+    }
+    last_posture_cpu = {
+      name: last_posture[name][:valid_count].detach().cpu().numpy()
+      for name in POSTURE_NAMES
+    }
 
     for local_idx in range(valid_count):
       motion_id = padded_ids[local_idx]
@@ -496,6 +555,19 @@ def main() -> None:
           row[f"mean_{name}"] = float("nan")
           row[f"max_{name}"] = float("nan")
         row[f"final_{name}"] = float(last_error_cpu[name][local_idx])
+
+      for name in POSTURE_NAMES:
+        if n_track > 0:
+          row[f"mean_{name}"] = float(
+            posture_sum_cpu[name][local_idx] / n_track
+          )
+          row[f"max_{name}"] = float(
+            posture_max_cpu[name][local_idx]
+          )
+        else:
+          row[f"mean_{name}"] = float("nan")
+          row[f"max_{name}"] = float("nan")
+        row[f"final_{name}"] = float(last_posture_cpu[name][local_idx])
 
       rows.append(row)
 
@@ -543,6 +615,17 @@ def main() -> None:
     },
     "mean_final_recovery_errors": {
       name: mean_field(f"final_{name}") for name in ERROR_NAMES
+    },
+    "posture_diagnostics": {
+      "mean": {
+        name: mean_field(f"mean_{name}") for name in POSTURE_NAMES
+      },
+      "mean_of_clip_max": {
+        name: mean_field(f"max_{name}") for name in POSTURE_NAMES
+      },
+      "mean_final": {
+        name: mean_field(f"final_{name}") for name in POSTURE_NAMES
+      },
     },
     "worst_20_by_mean_wrist_position_error": [
       {

@@ -111,9 +111,6 @@ def unitree_g1_teleop_env_cfg(
     "asset_cfg"
   ].body_names = ("torso_link",)
 
-  cfg.rewards["torso_upright"].params[
-    "asset_cfg"
-  ].body_names = ("torso_link",)
   cfg.rewards["feet_slide"].params[
     "asset_cfg"
   ].body_names = FEET

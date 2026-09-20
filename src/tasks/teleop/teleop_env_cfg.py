@@ -288,13 +288,6 @@ def make_teleop_env_cfg(
       },
     ),
 
-    "torso_upright": RewardTermCfg(
-      func=mdp.body_orientation_l2,
-      weight=-0.75,
-      params={
-        "asset_cfg": SceneEntityCfg("robot", body_names=()),
-      },
-    ),
     # Only active after the recorded trajectory ends.  This makes recovery
     # converge toward the G1 nominal standing posture without constraining the
     # redundancy used during the actual human-motion tracking phase.

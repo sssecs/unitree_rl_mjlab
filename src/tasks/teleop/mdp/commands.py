@@ -53,6 +53,12 @@ _TRACKING_ERROR_NAMES = (
 )
 
 
+_POSTURE_DIAGNOSTIC_NAMES = (
+  "torso_tilt",
+  "shoulder_height_delta_error",
+)
+
+
 
 def _yaw_quat_tensor(yaw: torch.Tensor) -> torch.Tensor:
   """Construct scalar-first yaw quaternions."""
@@ -300,6 +306,17 @@ class SparseWholeBodyCommand(CommandTerm):
       name: torch.zeros(self.num_envs, device=self.device)
       for name in _TRACKING_ERROR_NAMES
     }
+    # V7 diagnostics are deliberately NOT rewards.  They quantify whether
+    # shoulder constraints alone are sufficient after removing the explicit
+    # torso-upright penalty.  Statistics use the same recorded-motion window.
+    self._episode_posture_sum = {
+      name: torch.zeros(self.num_envs, device=self.device)
+      for name in _POSTURE_DIAGNOSTIC_NAMES
+    }
+    self._episode_posture_max = {
+      name: torch.zeros(self.num_envs, device=self.device)
+      for name in _POSTURE_DIAGNOSTIC_NAMES
+    }
     self._episode_motion_start_time = torch.zeros(
       self.num_envs, dtype=torch.float32, device=self.device
     )
@@ -319,7 +336,23 @@ class SparseWholeBodyCommand(CommandTerm):
     for name in metric_names:
       self.metrics[name] = torch.zeros(self.num_envs, device=self.device)
 
+    for name in _POSTURE_DIAGNOSTIC_NAMES:
+      self.metrics[f"posture_{name}"] = torch.zeros(
+        self.num_envs, device=self.device
+      )
+
     for name in _TRACKING_ERROR_NAMES:
+      self.metrics[f"episode_mean_{name}"] = torch.zeros(
+        self.num_envs, device=self.device
+      )
+      self.metrics[f"episode_max_{name}"] = torch.zeros(
+        self.num_envs, device=self.device
+      )
+      self.metrics[f"episode_final_{name}"] = torch.zeros(
+        self.num_envs, device=self.device
+      )
+
+    for name in _POSTURE_DIAGNOSTIC_NAMES:
       self.metrics[f"episode_mean_{name}"] = torch.zeros(
         self.num_envs, device=self.device
       )
@@ -1247,8 +1280,36 @@ class SparseWholeBodyCommand(CommandTerm):
       ),
     }
 
+  def current_posture_diagnostics(self) -> dict[str, torch.Tensor]:
+    """V7 non-reward posture diagnostics.
+
+    ``torso_tilt`` is the yaw-invariant angle between torso +Z and world +Z.
+    ``shoulder_height_delta_error`` compares the commanded and simulated
+    left-minus-right shoulder-height difference, which is the task-level
+    signal that already captures much of the desired lateral torso tilt.
+    """
+    rotation = matrix_from_quat(self.sim_stabilization_body_quat_w)
+    torso_up_dot = torch.clamp(rotation[:, 2, 2], -1.0, 1.0)
+    torso_tilt = torch.acos(torso_up_dot)
+
+    cmd_height_delta = (
+      self.cmd_left_shoulder_height - self.cmd_right_shoulder_height
+    )
+    sim_height_delta = (
+      self.sim_left_shoulder_height - self.sim_right_shoulder_height
+    )
+    shoulder_height_delta_error = torch.abs(
+      cmd_height_delta - sim_height_delta
+    )
+
+    return {
+      "torso_tilt": torso_tilt,
+      "shoulder_height_delta_error": shoulder_height_delta_error,
+    }
+
   def _update_metrics(self):
     errors = self.current_tracking_errors()
+    posture = self.current_posture_diagnostics()
     pending = self._alignment_pending
 
     # Preserve the instantaneous metrics for quick debugging.
@@ -1258,6 +1319,13 @@ class SparseWholeBodyCommand(CommandTerm):
         value_for_log = value.clone()
         value_for_log[pending] = 0.0
       self.metrics[f"cmd_vs_sim_{short_name}"] = value_for_log
+
+    for name, value in posture.items():
+      value_for_log = value
+      if torch.any(pending):
+        value_for_log = value.clone()
+        value_for_log[pending] = 0.0
+      self.metrics[f"posture_{name}"] = value_for_log
 
     # True episode statistics: integrate only the recorded-motion phase.
     active = self.motion_tracking_active
@@ -1269,6 +1337,13 @@ class SparseWholeBodyCommand(CommandTerm):
         active,
         torch.maximum(self._episode_error_max[name], value),
         self._episode_error_max[name],
+      )
+    for name, value in posture.items():
+      self._episode_posture_sum[name] += value * active_f
+      self._episode_posture_max[name] = torch.where(
+        active,
+        torch.maximum(self._episode_posture_max[name], value),
+        self._episode_posture_max[name],
       )
 
   def _finalize_episode_metrics(self, env_ids: torch.Tensor) -> None:
@@ -1285,9 +1360,21 @@ class SparseWholeBodyCommand(CommandTerm):
         self._episode_error_max[name][env_ids]
       )
 
+    for name in _POSTURE_DIAGNOSTIC_NAMES:
+      mean = self._episode_posture_sum[name][env_ids] / denom
+      mean = torch.where(steps > 0, mean, torch.zeros_like(mean))
+      self.metrics[f"episode_mean_{name}"][env_ids] = mean
+      self.metrics[f"episode_max_{name}"][env_ids] = (
+        self._episode_posture_max[name][env_ids]
+      )
+
     final_errors = self.current_tracking_errors()
     for name in _TRACKING_ERROR_NAMES:
       self.metrics[f"episode_final_{name}"][env_ids] = final_errors[name][env_ids]
+
+    final_posture = self.current_posture_diagnostics()
+    for name in _POSTURE_DIAGNOSTIC_NAMES:
+      self.metrics[f"episode_final_{name}"][env_ids] = final_posture[name][env_ids]
 
     completion = self.motion_completion_ratio[env_ids]
     self.metrics["episode_motion_completion_ratio"][env_ids] = completion
@@ -1317,6 +1404,9 @@ class SparseWholeBodyCommand(CommandTerm):
     for name in _TRACKING_ERROR_NAMES:
       self._episode_error_sum[name][env_ids] = 0.0
       self._episode_error_max[name][env_ids] = 0.0
+    for name in _POSTURE_DIAGNOSTIC_NAMES:
+      self._episode_posture_sum[name][env_ids] = 0.0
+      self._episode_posture_max[name][env_ids] = 0.0
 
   def reset(self, env_ids: torch.Tensor | None) -> dict[str, float]:
     assert isinstance(env_ids, torch.Tensor)

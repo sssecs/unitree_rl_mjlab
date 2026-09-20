@@ -485,6 +485,11 @@ Metrics/teleop/episode_max_left_shoulder_height_error
 Metrics/teleop/episode_mean_right_shoulder_height_error
 Metrics/teleop/episode_max_right_shoulder_height_error
 
+Metrics/teleop/episode_mean_torso_tilt
+Metrics/teleop/episode_max_torso_tilt
+Metrics/teleop/episode_mean_shoulder_height_delta_error
+Metrics/teleop/episode_max_shoulder_height_delta_error
+
 Metrics/teleop/episode_motion_completion_ratio
 Metrics/teleop/episode_motion_completed
 Metrics/teleop/episode_recovery_started
@@ -681,6 +686,42 @@ right_linkage_brace_collision
 The stock G1 MJCF has no separate patella collision geom, so this permits
 knee/shin-link support. If later we need "patella allowed, shin forbidden", the
 MJCF needs dedicated knee-pad collision geoms.
+
+
+## v7: task-constrained posture freedom
+
+V7 removes the explicit `torso_upright` reward entirely.  The sparse task
+already constrains left/right shoulder height and shoulder heading, so a second
+roll/pitch penalty is redundant for this formulation and can suppress useful
+human-like trunk motion during low-object manipulation.  In particular, V7
+does **not** penalize forward trunk pitch or lateral trunk roll during the
+recorded motion phase.
+
+The primary task rewards, observations, command interface, action space, and
+25-frame history are unchanged from v6.  Therefore the actor/critic observation
+shapes are unchanged and v6 checkpoints remain shape-compatible for fine-tuning.
+
+Stability is still constrained by task tracking and physical terms: shoulder
+height/heading tracking, wrist tracking, joint limits, foot slip, unwanted
+ground contact, self collision, fall termination, and the existing recovery
+posture term.  Knee/shin support remains allowed.
+
+Two diagnostics are added but carry **zero reward weight**:
+
+```text
+Metrics/teleop/posture_torso_tilt
+Metrics/teleop/posture_shoulder_height_delta_error
+Metrics/teleop/episode_mean_torso_tilt
+Metrics/teleop/episode_max_torso_tilt
+Metrics/teleop/episode_mean_shoulder_height_delta_error
+Metrics/teleop/episode_max_shoulder_height_delta_error
+```
+
+`torso_tilt` is the yaw-invariant angle (rad) between torso +Z and world +Z.
+`shoulder_height_delta_error` is
+`|(cmd_left_h-cmd_right_h) - (sim_left_h-sim_right_h)|`, which directly checks
+whether the shoulder-height task signal is sufficient to regulate the lateral
+body configuration without an explicit roll reward.
 
 
 ## v5.1 evaluator performance fix

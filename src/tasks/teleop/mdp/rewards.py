@@ -7,10 +7,7 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
-from mjlab.utils.lab_api.math import (
-  quat_apply_inverse,
-  quat_error_magnitude,
-)
+from mjlab.utils.lab_api.math import quat_error_magnitude
 
 from .commands import SparseWholeBodyCommand, _yaw_quat_tensor
 
@@ -201,26 +198,6 @@ def shoulder_heading_tracking_exp(
   )
   excess = torch.relu(error - tolerance)
   return torch.exp(-excess.square() / std**2)
-
-
-def body_orientation_l2(
-  env: ManagerBasedRlEnv,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-) -> torch.Tensor:
-  """Penalize physical torso/root tilt while leaving yaw free."""
-  asset: Entity = env.scene[asset_cfg.name]
-
-  if asset_cfg.body_ids:
-    body_quat_w = asset.data.body_link_quat_w[:, asset_cfg.body_ids, :]
-    body_quat_w = body_quat_w.squeeze(1)
-    gravity_w = asset.data.gravity_vec_w
-    projected_gravity_b = quat_apply_inverse(body_quat_w, gravity_w)
-    return torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
-
-  return torch.sum(
-    torch.square(asset.data.projected_gravity_b[:, :2]),
-    dim=1,
-  )
 
 
 def recovery_joint_posture_l2(
