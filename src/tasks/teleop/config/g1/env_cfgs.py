@@ -32,8 +32,9 @@ def unitree_g1_teleop_env_cfg(
   play: bool = False,
   command_dir: str = "",
   command_file: str = "",
+  history_length: int = 25,
 ) -> ManagerBasedRlEnvCfg:
-  cfg = make_teleop_env_cfg()
+  cfg = make_teleop_env_cfg(history_length=history_length)
 
   cfg.scene.entities = {"robot": get_g1_robot_cfg()}
 

@@ -22,17 +22,23 @@ import src.tasks.teleop.mdp as mdp
 from src.tasks.teleop.mdp import SparseWholeBodyCommandCfg
 
 
-def make_teleop_env_cfg() -> ManagerBasedRlEnvCfg:
+def make_teleop_env_cfg(
+  history_length: int = 25,
+) -> ManagerBasedRlEnvCfg:
   """Create the flat-ground privileged teacher environment."""
+  if history_length < 1:
+    raise ValueError("history_length must be >= 1")
 
   # -----------------------------------------------------------------------
   # Observations
   #
-  # Teacher actor sees BOTH:
+  # Teacher actor sees:
   #   1) absolute command target in a fixed episode/world frame
   #   2) absolute simulated task state in the same fixed frame
+  #   3) explicit CURRENT target-minus-sim vector errors
   #
-  # No task target is represented relative to the current robot pose.
+  # The explicit error is causal: it never indexes a future NPZ frame.
+  # Observation history contains only current/past samples.
   # -----------------------------------------------------------------------
 
   actor_terms = {
@@ -50,6 +56,10 @@ def make_teleop_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "sim_wrist_lin_vel_absolute": ObservationTermCfg(
       func=mdp.sim_wrist_linear_velocity_absolute,
+      params={"command_name": "teleop"},
+    ),
+    "task_error_vector": ObservationTermCfg(
+      func=mdp.teleop_explicit_vector_errors,
       params={"command_name": "teleop"},
     ),
     "base_ang_vel": ObservationTermCfg(
@@ -89,13 +99,13 @@ def make_teleop_env_cfg() -> ManagerBasedRlEnvCfg:
       terms=actor_terms,
       concatenate_terms=True,
       enable_corruption=True,
-      history_length=3,
+      history_length=history_length,
     ),
     "critic": ObservationGroupCfg(
       terms=critic_terms,
       concatenate_terms=True,
       enable_corruption=False,
-      history_length=3,
+      history_length=history_length,
     ),
   }
 

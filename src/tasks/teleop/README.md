@@ -681,3 +681,108 @@ right_linkage_brace_collision
 The stock G1 MJCF has no separate patella collision geom, so this permits
 knee/shin-link support. If later we need "patella allowed, shin forbidden", the
 MJCF needs dedicated knee-pad collision geoms.
+
+
+## v5.1 evaluator performance fix
+
+The exhaustive evaluator previously executed Python conditions on CUDA tensors
+on every environment step:
+
+```python
+if not torch.any(active_env):
+...
+if not torch.any(newly_done):
+...
+```
+
+Those branches force CUDA-to-CPU synchronization and serialize an otherwise
+asynchronous GPU rollout.
+
+The v5.1 evaluator keeps done/metric state on GPU and synchronizes only every
+`--progress-interval-steps` (default 250) for status output, plus once at the
+end of each batch.
+
+It also sorts motions by duration before batching by default.  This reduces
+wasted simulation caused by short clips sharing a batch with a very long clip.
+
+Useful options:
+
+```bash
+--batch-size 256
+--progress-interval-steps 250
+--preserve-motion-order
+```
+
+The evaluator prints motion-duration statistics and an estimated batching
+padding ratio.  A high padding ratio means smaller duration-bucketed batches can
+be faster than putting every motion in one batch, even when the larger batch has
+more GPU occupancy.
+
+
+## v6: explicit causal task-error vector + 25-frame history
+
+The teacher now receives an explicit **24-D current target-minus-state error
+vector** in addition to the existing absolute command and simulated task state:
+
+```text
+left wrist position error (_ew)        3
+right wrist position error (_ew)       3
+left wrist rotation-vector error       3
+right wrist rotation-vector error      3
+left wrist linear-velocity error       3
+right wrist linear-velocity error      3
+shoulder-mid XY error                  2
+left/right shoulder-height error       2
+shoulder heading [cos,sin] error       2
+                                        --
+                                        24
+```
+
+Wrist orientation uses:
+
+```python
+quat_box_minus(target_quat, measured_quat)
+```
+
+which gives a shortest/sign-invariant axis-angle error vector.  Heading uses
+the difference between target and measured `[cos(yaw), sin(yaw)]` vectors, so
+the representation is continuous through +/-pi.
+
+### Causal contract
+
+`task_error_vector` uses only the **current** emitted teleop command and current
+robot state. It does not access a future NPZ sample. History likewise contains
+only current and past observations.
+
+### Longer history
+
+The default is now:
+
+```python
+history_length = 25
+```
+
+At 50 Hz this covers about 0.5 s.
+
+Both `make_teleop_env_cfg()` and `unitree_g1_teleop_env_cfg()` accept an
+optional `history_length` argument, so 3/10/25-frame ablations do not require
+editing the observation implementation.
+
+### Default observation size
+
+v5/v5.1 actor features per frame: 153  
+v6 explicit vector error: +24  
+v6 actor features per frame: 177
+
+With 25-frame history:
+
+```text
+actor  = 177 * 25 = 4425
+critic = 188 * 25 = 4700
+```
+
+The critic keeps the previous 8 scalar task-error summary in addition to the
+new vector error.
+
+This changes network input shape, so v5/v5.1 checkpoints are **not directly
+compatible**. Train a fresh v6 policy.

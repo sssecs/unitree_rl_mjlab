@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 import torch
-from mjlab.utils.lab_api.math import quat_error_magnitude
+from mjlab.utils.lab_api.math import quat_box_minus, quat_error_magnitude
 
 from .commands import (
   SparseWholeBodyCommand,
@@ -44,6 +44,101 @@ def sim_task_state_absolute(
     dim=-1,
   )
 
+
+
+def teleop_explicit_vector_errors(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+) -> torch.Tensor:
+  """24-D causal task-space error vector for the teacher actor and critic.
+
+  Only the current emitted command and current simulated state are used.
+  No future NPZ frame is sampled.
+
+  Layout:
+    left wrist position error (_ew)          3
+    right wrist position error (_ew)         3
+    left wrist orientation box-minus         3
+    right wrist orientation box-minus        3
+    left wrist linear-velocity error (_w)    3
+    right wrist linear-velocity error (_w)   3
+    shoulder-mid XY error (_ew)              2
+    left/right shoulder-height error         2
+    shoulder-heading vector error            2
+                                             --
+                                             24
+  """
+  command = cast(
+    SparseWholeBodyCommand,
+    env.command_manager.get_term(command_name),
+  )
+
+  # Robust to observation-term ordering after reset.
+  command.ensure_episode_alignment()
+
+  left_pos_error = (
+    command.cmd_left_wrist_pos_ew
+    - command.sim_left_wrist_pos_ew
+  )
+  right_pos_error = (
+    command.cmd_right_wrist_pos_ew
+    - command.sim_right_wrist_pos_ew
+  )
+
+  # Shortest/sign-invariant target-minus-current orientation error.
+  left_rot_error = quat_box_minus(
+    command.cmd_left_wrist_quat_w,
+    command.sim_left_wrist_quat_w,
+  )
+  right_rot_error = quat_box_minus(
+    command.cmd_right_wrist_quat_w,
+    command.sim_right_wrist_quat_w,
+  )
+
+  left_vel_error = (
+    command.cmd_left_wrist_lin_vel_w
+    - command.sim_left_wrist_lin_vel_w
+  )
+  right_vel_error = (
+    command.cmd_right_wrist_lin_vel_w
+    - command.sim_right_wrist_lin_vel_w
+  )
+
+  shoulder_mid_error = (
+    command.cmd_shoulder_mid_xy_ew
+    - command.sim_shoulder_mid_pos_ew[:, :2]
+  )
+
+  shoulder_height_error = torch.stack(
+    (
+      command.cmd_left_shoulder_height
+      - command.sim_left_shoulder_height,
+      command.cmd_right_shoulder_height
+      - command.sim_right_shoulder_height,
+    ),
+    dim=-1,
+  )
+
+  # [cos(yaw), sin(yaw)] difference stays continuous at +/-pi.
+  heading_error = (
+    command.cmd_shoulder_heading_vec_w
+    - command.sim_shoulder_heading_vec_w
+  )
+
+  return torch.cat(
+    (
+      left_pos_error,
+      right_pos_error,
+      left_rot_error,
+      right_rot_error,
+      left_vel_error,
+      right_vel_error,
+      shoulder_mid_error,
+      shoulder_height_error,
+      heading_error,
+    ),
+    dim=-1,
+  )
 
 def teleop_tracking_errors(
   env: ManagerBasedRlEnv,
