@@ -133,6 +133,12 @@ class SparseWholeBodyCommand(CommandTerm):
     env: ManagerBasedRlEnv,
   ):
     super().__init__(cfg, env)
+    if cfg.style_mode not in ("baseline", "descriptor"):
+      raise ValueError("style_mode must be 'baseline' or 'descriptor'.")
+    if cfg.balance_mode not in ("off", "reward", "reward_gate"):
+      raise ValueError(
+        "balance_mode must be 'off', 'reward', or 'reward_gate'."
+      )
 
     self.robot: Entity = env.scene[cfg.entity_name]
 
@@ -150,6 +156,36 @@ class SparseWholeBodyCommand(CommandTerm):
     )
     self.right_shoulder_index = self.robot.body_names.index(
       cfg.right_shoulder_body_name
+    )
+    self.style_pelvis_index = self.robot.body_names.index(
+      cfg.style_pelvis_body_name
+    )
+    self.style_left_shoulder_index = self.robot.body_names.index(
+      cfg.style_left_shoulder_body_name
+    )
+    self.style_right_shoulder_index = self.robot.body_names.index(
+      cfg.style_right_shoulder_body_name
+    )
+    self.style_left_hip_index = self.robot.body_names.index(
+      cfg.style_left_hip_body_name
+    )
+    self.style_right_hip_index = self.robot.body_names.index(
+      cfg.style_right_hip_body_name
+    )
+    self.style_left_knee_index = self.robot.body_names.index(
+      cfg.style_left_knee_body_name
+    )
+    self.style_right_knee_index = self.robot.body_names.index(
+      cfg.style_right_knee_body_name
+    )
+    self.style_left_ankle_index = self.robot.body_names.index(
+      cfg.style_left_ankle_body_name
+    )
+    self.style_right_ankle_index = self.robot.body_names.index(
+      cfg.style_right_ankle_body_name
+    )
+    self.balance_foot_indices = tuple(
+      self.robot.body_names.index(name) for name in cfg.balance_foot_body_names
     )
 
     command_dir = cfg.command_dir or os.environ.get(
@@ -177,6 +213,7 @@ class SparseWholeBodyCommand(CommandTerm):
       recursive=cfg.recursive_scan,
       skip_invalid_files=cfg.skip_invalid_files,
       sampling_weight_mode=cfg.motion_sampling_weight_mode,
+      load_style_descriptors=cfg.style_mode == "descriptor",
     )
 
     # Every vectorized environment owns an independent selected motion id.
@@ -320,6 +357,21 @@ class SparseWholeBodyCommand(CommandTerm):
     self._episode_motion_start_time = torch.zeros(
       self.num_envs, dtype=torch.float32, device=self.device
     )
+    self._episode_com_margin_sum = torch.zeros(
+      self.num_envs, dtype=torch.float32, device=self.device
+    )
+    self._episode_com_margin_min = torch.full(
+      (self.num_envs,), torch.inf, dtype=torch.float32, device=self.device
+    )
+    self.balance_com_margin = torch.zeros(
+      self.num_envs, dtype=torch.float32, device=self.device
+    )
+    self.balance_reward_value = torch.zeros(
+      self.num_envs, dtype=torch.float32, device=self.device
+    )
+    self.balance_style_gate = torch.ones(
+      self.num_envs, dtype=torch.float32, device=self.device
+    )
 
     metric_names = (
       "cmd_vs_sim_left_wrist_pos_error",
@@ -373,6 +425,31 @@ class SparseWholeBodyCommand(CommandTerm):
     ):
       self.metrics[name] = torch.zeros(self.num_envs, device=self.device)
 
+    for name in (
+      "balance/com_margin",
+      "balance/com_margin_min",
+      "balance/balance_reward",
+      "balance/style_balance_gate",
+      "episode/com_margin_mean",
+      "episode/com_margin_min",
+    ):
+      self.metrics[name] = torch.zeros(self.num_envs, device=self.device)
+
+    if cfg.style_mode == "descriptor":
+      for name in (
+        "style_active_fraction",
+        "style_pelvis_reward",
+        "style_leg_reward",
+        "style_torso_reward",
+        "style_shoulder_pelvis_reward",
+        "style_knee_reward",
+        "style_task_gate",
+        "style_stability_gate",
+        "style_robot_pelvis_height",
+        "style_human_pelvis_height",
+      ):
+        self.metrics[name] = torch.zeros(self.num_envs, device=self.device)
+
     all_envs = torch.arange(
       self.num_envs, dtype=torch.long, device=self.device
     )
@@ -386,6 +463,151 @@ class SparseWholeBodyCommand(CommandTerm):
   def get_motion_name(self, env_idx: int) -> str:
     """Relative path/name of the clip currently assigned to one environment."""
     return self.motion.get_motion_name(int(self.motion_ids[env_idx].item()))
+
+  def human_style_target(
+    self,
+    env_ids: torch.Tensor,
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Human descriptor synchronized to the exact teleop command frame."""
+    return self.motion.sample_style(
+      self.motion_ids[env_ids], self.command_time[env_ids]
+    )
+
+  def robot_style_descriptor(self) -> torch.Tensor:
+    """Current G1 descriptor groups used by the minimal V7 style reward."""
+    body = self.robot.data.body_link_pos_w
+    pelvis = body[:, self.style_pelvis_index]
+    shoulders = body[:, (
+      self.style_left_shoulder_index,
+      self.style_right_shoulder_index,
+    )]
+    shoulder_mid = shoulders.mean(dim=1)
+    hips = body[:, (self.style_left_hip_index, self.style_right_hip_index)]
+    knees = body[:, (self.style_left_knee_index, self.style_right_knee_index)]
+    ankles = body[:, (
+      self.style_left_ankle_index,
+      self.style_right_ankle_index,
+    )]
+    ground_z = self._env.scene.env_origins[:, 2]
+    leg_lengths = torch.as_tensor(
+      self.cfg.robot_leg_lengths, dtype=body.dtype, device=self.device
+    )
+    mean_leg_length = leg_lengths.mean()
+
+    pelvis_height = (
+      pelvis[:, 2] - ground_z
+    ) / self.cfg.robot_neutral_pelvis_height
+    leg_extension = torch.linalg.vector_norm(
+      hips - ankles, dim=-1
+    ) / leg_lengths
+    knee_ground = (
+      knees[..., 2] - ground_z[:, None]
+    ).clamp_min(0.0) / mean_leg_length
+
+    left = shoulders[:, 0, :2] - shoulders[:, 1, :2]
+    left = left / torch.linalg.vector_norm(
+      left, dim=-1, keepdim=True
+    ).clamp_min(1.0e-6)
+    forward = torch.stack((left[:, 1], -left[:, 0]), dim=-1)
+    torso_up = shoulder_mid - pelvis
+    torso_up = torso_up / torch.linalg.vector_norm(
+      torso_up, dim=-1, keepdim=True
+    ).clamp_min(1.0e-6)
+    torso_pitch = torch.atan2(
+      torch.sum(torso_up[:, :2] * forward, dim=-1), torso_up[:, 2]
+    )
+    shoulder_delta = shoulder_mid[:, :2] - pelvis[:, :2]
+    shoulder_rel = torch.stack((
+      torch.sum(shoulder_delta * forward, dim=-1),
+      torch.sum(shoulder_delta * left, dim=-1),
+    ), dim=-1) / mean_leg_length
+
+    return torch.cat((
+      pelvis_height[:, None],
+      leg_extension,
+      knee_ground,
+      torso_pitch[:, None],
+      shoulder_rel,
+    ), dim=-1)
+
+  def compute_com_support_margin(self) -> torch.Tensor:
+    """Signed XY distance from whole-robot COM to the contacting-foot hull."""
+    if self.cfg.balance_mode == "off":
+      return torch.zeros(self.num_envs, device=self.device)
+
+    # MuJoCo's root subtree COM is the mass-weighted COM of the entire robot.
+    root_body_id = self.robot.data.indexing.root_body_id
+    com_xy = self.robot.data.data.subtree_com[:, root_body_id, :2]
+
+    foot_pos = self.robot.data.body_link_pos_w[:, self.balance_foot_indices]
+    foot_quat = self.robot.data.body_link_quat_w[:, self.balance_foot_indices]
+    foot_rotation = matrix_from_quat(foot_quat)
+    x_min, x_max = self.cfg.balance_foot_x_range
+    y_min, y_max = self.cfg.balance_foot_y_range
+    corners_b = torch.tensor(
+      (
+        (x_min, y_min, 0.0),
+        (x_max, y_min, 0.0),
+        (x_max, y_max, 0.0),
+        (x_min, y_max, 0.0),
+      ),
+      dtype=foot_pos.dtype,
+      device=self.device,
+    )
+    corners_w = foot_pos[:, :, None, :] + torch.einsum(
+      "bfij,kj->bfki", foot_rotation, corners_b
+    )
+    points = corners_w[..., :2].reshape(self.num_envs, 8, 2)
+
+    contact = self._env.scene[self.cfg.balance_contact_sensor_name].data.found
+    if contact is None or contact.shape[1] != 2:
+      raise RuntimeError(
+        "COM balance requires a two-foot contact sensor with the 'found' field."
+      )
+    point_valid = (contact > 0).repeat_interleave(4, dim=1)
+
+    # Find all CCW support edges of the convex hull.  With eight points this
+    # exhaustive vectorized test is small and handles both single/double support.
+    start = points[:, :, None, :]
+    edge = points[:, None, :, :] - start
+    edge_len_sq = torch.sum(torch.square(edge), dim=-1)
+    other = points[:, None, None, :, :] - start[:, :, :, None, :]
+    cross_all = (
+      edge[..., None, 0] * other[..., 1]
+      - edge[..., None, 1] * other[..., 0]
+    )
+    all_points_left = torch.all(
+      (~point_valid[:, None, None, :]) | (cross_all >= -1.0e-6), dim=-1
+    )
+    edge_valid = (
+      point_valid[:, :, None]
+      & point_valid[:, None, :]
+      & (edge_len_sq > 1.0e-12)
+      & all_points_left
+    )
+
+    com_from_start = com_xy[:, None, :] - points
+    signed_edge_distance = (
+      edge[..., 0] * com_from_start[:, :, None, 1]
+      - edge[..., 1] * com_from_start[:, :, None, 0]
+    ) / torch.sqrt(edge_len_sq.clamp_min(1.0e-12))
+    inside_margin = signed_edge_distance.masked_fill(
+      ~edge_valid, torch.inf
+    ).amin(dim=(1, 2))
+    inside = inside_margin >= 0.0
+
+    projection = torch.sum(
+      com_from_start[:, :, None, :] * edge, dim=-1
+    ) / edge_len_sq.clamp_min(1.0e-12)
+    projection = projection.clamp(0.0, 1.0)
+    closest = start + projection[..., None] * edge
+    segment_distance = torch.linalg.vector_norm(
+      com_xy[:, None, None, :] - closest, dim=-1
+    ).masked_fill(~edge_valid, torch.inf).amin(dim=(1, 2))
+
+    has_support = edge_valid.any(dim=(1, 2))
+    margin = torch.where(inside, inside_margin, -segment_distance)
+    return torch.where(has_support, margin, torch.full_like(margin, -0.10))
 
   # -----------------------------------------------------------------------
   # Simulation measurements.
@@ -1331,6 +1553,38 @@ class SparseWholeBodyCommand(CommandTerm):
     active = self.motion_tracking_active
     active_f = active.to(torch.float32)
     self._episode_tracking_steps += active.to(torch.long)
+
+    if self.cfg.balance_mode == "off":
+      self.balance_com_margin.zero_()
+      self.balance_reward_value.zero_()
+      self.balance_style_gate.fill_(1.0)
+    else:
+      self.balance_com_margin = self.compute_com_support_margin()
+      self.balance_reward_value = torch.sigmoid(
+        (self.balance_com_margin - 0.02) / 0.015
+      )
+      if self.cfg.balance_mode == "reward_gate":
+        self.balance_style_gate = torch.sigmoid(
+          (self.balance_com_margin - 0.01) / 0.01
+        )
+      else:
+        self.balance_style_gate.fill_(1.0)
+
+    self._episode_com_margin_sum += self.balance_com_margin * active_f
+    self._episode_com_margin_min = torch.where(
+      active,
+      torch.minimum(self._episode_com_margin_min, self.balance_com_margin),
+      self._episode_com_margin_min,
+    )
+    running_min = torch.where(
+      torch.isfinite(self._episode_com_margin_min),
+      self._episode_com_margin_min,
+      torch.zeros_like(self._episode_com_margin_min),
+    )
+    self.metrics["balance/com_margin"] = self.balance_com_margin
+    self.metrics["balance/com_margin_min"] = running_min
+    self.metrics["balance/balance_reward"] = self.balance_reward_value
+    self.metrics["balance/style_balance_gate"] = self.balance_style_gate
     for name, value in errors.items():
       self._episode_error_sum[name] += value * active_f
       self._episode_error_max[name] = torch.where(
@@ -1352,6 +1606,12 @@ class SparseWholeBodyCommand(CommandTerm):
 
     steps = self._episode_tracking_steps[env_ids]
     denom = torch.clamp(steps, min=1).to(torch.float32)
+    com_mean = self._episode_com_margin_sum[env_ids] / denom
+    com_mean = torch.where(steps > 0, com_mean, torch.zeros_like(com_mean))
+    com_min = self._episode_com_margin_min[env_ids]
+    com_min = torch.where(torch.isfinite(com_min), com_min, torch.zeros_like(com_min))
+    self.metrics["episode/com_margin_mean"][env_ids] = com_mean
+    self.metrics["episode/com_margin_min"][env_ids] = com_min
     for name in _TRACKING_ERROR_NAMES:
       mean = self._episode_error_sum[name][env_ids] / denom
       mean = torch.where(steps > 0, mean, torch.zeros_like(mean))
@@ -1401,6 +1661,8 @@ class SparseWholeBodyCommand(CommandTerm):
     if len(env_ids) == 0:
       return
     self._episode_tracking_steps[env_ids] = 0
+    self._episode_com_margin_sum[env_ids] = 0.0
+    self._episode_com_margin_min[env_ids] = torch.inf
     for name in _TRACKING_ERROR_NAMES:
       self._episode_error_sum[name][env_ids] = 0.0
       self._episode_error_max[name][env_ids] = 0.0
@@ -1624,6 +1886,29 @@ class SparseWholeBodyCommandCfg(CommandTermCfg):
   right_wrist_body_name: str = "right_wrist_yaw_link"
   left_shoulder_body_name: str = "left_shoulder_roll_link"
   right_shoulder_body_name: str = "right_shoulder_roll_link"
+
+  # Robot landmarks for the shared human/G1 descriptor frame.
+  style_pelvis_body_name: str = "pelvis"
+  style_left_shoulder_body_name: str = "left_shoulder_pitch_link"
+  style_right_shoulder_body_name: str = "right_shoulder_pitch_link"
+  style_left_hip_body_name: str = "left_hip_pitch_link"
+  style_right_hip_body_name: str = "right_hip_pitch_link"
+  style_left_knee_body_name: str = "left_knee_link"
+  style_right_knee_body_name: str = "right_knee_link"
+  style_left_ankle_body_name: str = "left_ankle_pitch_link"
+  style_right_ankle_body_name: str = "right_ankle_pitch_link"
+  style_mode: Literal["baseline", "descriptor"] = "baseline"
+  robot_neutral_pelvis_height: float = 0.79
+  robot_leg_lengths: tuple[float, float] = (0.6409335, 0.6409335)
+
+  # Static COM balance ablation. ``reward_gate`` additionally gates style.
+  balance_mode: Literal["off", "reward", "reward_gate"] = "off"
+  balance_contact_sensor_name: str = "feet_ground_contact"
+  balance_foot_body_names: tuple[str, str] = (
+    "left_ankle_roll_link", "right_ankle_roll_link"
+  )
+  balance_foot_x_range: tuple[float, float] = (-0.054, 0.132)
+  balance_foot_y_range: tuple[float, float] = (-0.027, 0.027)
 
   sampling_mode: Literal["start", "uniform"] = "start"
   loop: bool = False

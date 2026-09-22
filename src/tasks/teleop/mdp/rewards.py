@@ -70,6 +70,112 @@ def _wrist_position_rms_error(
   return torch.sqrt(0.5 * (left.square() + right.square()) + 1.0e-12)
 
 
+def com_balance_reward(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+) -> torch.Tensor:
+  """Reward a positive whole-robot COM margin inside the support polygon."""
+  command = _command(env, command_name)
+  if command.cfg.balance_mode == "off":
+    return torch.zeros(env.num_envs, device=env.device)
+  return command.balance_reward_value
+
+
+def human_style_reward(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+) -> torch.Tensor:
+  """Synchronized five-group style reward with task and motion gates."""
+  command = _command(env, command_name)
+  result = torch.zeros(env.num_envs, device=env.device)
+  if command.cfg.style_mode == "baseline":
+    return result
+
+  metric_names = (
+    "style_active_fraction",
+    "style_pelvis_reward",
+    "style_leg_reward",
+    "style_torso_reward",
+    "style_shoulder_pelvis_reward",
+    "style_knee_reward",
+    "style_task_gate",
+    "style_stability_gate",
+    "style_robot_pelvis_height",
+    "style_human_pelvis_height",
+  )
+  for name in metric_names:
+    command.metrics[name].zero_()
+
+  # This excludes alignment, command warm-up, and post-motion recovery.
+  env_ids = command.motion_tracking_active.nonzero().flatten()
+  if env_ids.numel() == 0:
+    return result
+
+  human, valid = command.human_style_target(env_ids)
+  robot = command.robot_style_descriptor()[env_ids]
+
+  pelvis_reward = torch.exp(-torch.square((robot[:, 0] - human[:, 0]) / 0.08))
+  leg_error_sq = 0.5 * torch.sum(
+    torch.square(robot[:, 1:3] - human[:, 1:3]), dim=-1
+  )
+  leg_reward = torch.exp(-leg_error_sq / 0.10**2)
+  torso_error = torch.atan2(
+    torch.sin(robot[:, 5] - human[:, 5]),
+    torch.cos(robot[:, 5] - human[:, 5]),
+  )
+  torso_reward = torch.exp(-torch.square(torso_error / 0.25))
+  shoulder_error = torch.linalg.vector_norm(
+    robot[:, 6:8] - human[:, 6:8], dim=-1
+  )
+  shoulder_reward = torch.exp(-torch.square(shoulder_error / 0.12))
+
+  knee_activation = torch.exp(-torch.square(human[:, 3:5] / 0.12))
+  knee_match = torch.exp(
+    -torch.square((robot[:, 3:5] - human[:, 3:5]) / 0.09)
+  )
+  knee_reward = torch.sum(knee_activation * knee_match, dim=-1) / (
+    torch.sum(knee_activation, dim=-1) + 1.0e-6
+  )
+
+  style_reward = (
+    0.30 * pelvis_reward
+    + 0.35 * leg_reward
+    + 0.15 * torso_reward
+    + 0.20 * shoulder_reward
+    + 0.15 * knee_reward
+  )
+
+  wrist_error = _wrist_position_rms_error(command)[env_ids]
+  task_gate = torch.sigmoid((0.10 - wrist_error) / 0.025)
+  # Fast-V7 diagnostic stage: torso/pelvis tilt can be intentional in bend
+  # motions, and push disturbance is disabled.  Do not suppress the style
+  # signal based on posture; restore a pelvis/root dynamics gate only when
+  # perturbation training is re-enabled.
+  stability_gate = torch.ones_like(task_gate)
+  balance_gate = command.balance_style_gate[env_ids]
+
+  active = valid.to(style_reward.dtype)
+  result[env_ids] = (
+    active * task_gate * stability_gate * balance_gate * style_reward
+  )
+
+  values = {
+    "style_active_fraction": active,
+    "style_pelvis_reward": active * pelvis_reward,
+    "style_leg_reward": active * leg_reward,
+    "style_torso_reward": active * torso_reward,
+    "style_shoulder_pelvis_reward": active * shoulder_reward,
+    "style_knee_reward": active * knee_reward,
+    "style_task_gate": active * task_gate,
+    "style_stability_gate": active * stability_gate,
+    "style_robot_pelvis_height": active * robot[:, 0],
+    "style_human_pelvis_height": active * human[:, 0],
+  }
+  for name, value in values.items():
+    command.metrics[name][env_ids] = value
+  return result
+
+
 def wrist_position_coarse_exp(
   env: ManagerBasedRlEnv,
   command_name: str,

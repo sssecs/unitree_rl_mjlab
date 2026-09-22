@@ -10,6 +10,25 @@ import torch
 
 
 EXPECTED_INTERFACE_VERSION = "3.2"
+STYLE_DESCRIPTOR_NAMES = (
+  "pelvis_height_neutral_norm",
+  "effective_leg_length_left",
+  "effective_leg_length_right",
+  "knee_ground_distance_left",
+  "knee_ground_distance_right",
+  "torso_pitch",
+  "shoulder_mid_rel_pelvis_forward",
+  "shoulder_mid_rel_pelvis_left",
+  "shoulder_pelvis_yaw_difference",
+  "left_foot_rel_pelvis_forward",
+  "left_foot_rel_pelvis_left",
+  "right_foot_rel_pelvis_forward",
+  "right_foot_rel_pelvis_left",
+  "foot_pseudo_contact_left",
+  "foot_pseudo_contact_right",
+  "knee_pseudo_contact_left",
+  "knee_pseudo_contact_right",
+)
 
 
 def _np_quat_mul(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
@@ -78,6 +97,7 @@ class SparseWholeBodyMotionLibrary:
     recursive: bool = True,
     skip_invalid_files: bool = True,
     sampling_weight_mode: Literal["uniform", "duration"] = "uniform",
+    load_style_descriptors: bool = False,
   ) -> None:
     self.device = device
     self.source_path = Path(command_source).expanduser().resolve()
@@ -102,6 +122,9 @@ class SparseWholeBodyMotionLibrary:
       "right_shoulder_h": [],
       "shoulder_heading": [],
     }
+    if load_style_descriptors:
+      arrays["style_descriptor"] = []
+      arrays["style_valid"] = []
     valid_files: list[Path] = []
     num_frames: list[int] = []
     durations: list[float] = []
@@ -113,6 +136,7 @@ class SparseWholeBodyMotionLibrary:
         clip, version = self._load_one_npz(
           path,
           canonicalize_heading=canonicalize_heading,
+          load_style_descriptors=load_style_descriptors,
         )
       except Exception as exc:
         if not skip_invalid_files:
@@ -207,6 +231,19 @@ class SparseWholeBodyMotionLibrary:
       dtype=torch.float32,
       device=device,
     )
+    self.style_descriptor_flat: torch.Tensor | None = None
+    self.style_valid_flat: torch.Tensor | None = None
+    if load_style_descriptors:
+      self.style_descriptor_flat = torch.tensor(
+        np.concatenate(arrays["style_descriptor"], axis=0),
+        dtype=torch.float32,
+        device=device,
+      )
+      self.style_valid_flat = torch.tensor(
+        np.concatenate(arrays["style_valid"], axis=0),
+        dtype=torch.bool,
+        device=device,
+      )
 
     if sampling_weight_mode == "uniform":
       raw_weights = torch.ones(
@@ -288,13 +325,18 @@ class SparseWholeBodyMotionLibrary:
       raise FileNotFoundError(f"Command source does not exist: {source}")
 
     iterator = source.rglob("*.npz") if recursive else source.glob("*.npz")
-    return sorted(path for path in iterator if path.is_file())
+    return sorted(
+      path
+      for path in iterator
+      if path.is_file() and not path.name.endswith(".style.npz")
+    )
 
   @classmethod
   def _load_one_npz(
     cls,
     path: Path,
     canonicalize_heading: bool,
+    load_style_descriptors: bool,
   ) -> tuple[dict[str, np.ndarray], str]:
     with np.load(path, allow_pickle=False) as data:
       missing = [key for key in cls.REQUIRED_KEYS if key not in data.files]
@@ -428,8 +470,7 @@ class SparseWholeBodyMotionLibrary:
       np.linalg.norm(right_quat, axis=-1, keepdims=True), 1.0e-8
     )
 
-    return (
-      {
+    clip = {
         "timestamp": timestamp.astype(np.float32),
         "left_pos": left_pos,
         "left_quat": left_quat,
@@ -439,9 +480,56 @@ class SparseWholeBodyMotionLibrary:
         "left_shoulder_h": left_shoulder_h,
         "right_shoulder_h": right_shoulder_h,
         "shoulder_heading": shoulder_heading.astype(np.float32),
-      },
-      version,
-    )
+    }
+
+    if load_style_descriptors:
+      style_path = path.with_name(f"{path.stem}.style.npz")
+      if not style_path.is_file():
+        raise RuntimeError(f"missing paired descriptor file {style_path.name}")
+      with np.load(style_path, allow_pickle=False) as style_data:
+        required = (
+          "timestamp", "style_descriptor", "style_valid_mask",
+          "style_descriptor_names",
+        )
+        missing = [key for key in required if key not in style_data.files]
+        if missing:
+          raise RuntimeError(
+            f"paired descriptor file {style_path.name} missing keys {missing}"
+          )
+        style_timestamp = np.asarray(
+          style_data["timestamp"], dtype=np.float64
+        ).copy()
+        descriptor = np.asarray(
+          style_data["style_descriptor"], dtype=np.float32
+        ).copy()
+        valid = np.asarray(
+          style_data["style_valid_mask"], dtype=np.bool_
+        ).copy()
+        names = tuple(str(name) for name in style_data["style_descriptor_names"])
+
+      if style_timestamp.shape != (n,) or not np.allclose(
+        style_timestamp - style_timestamp[0], timestamp, rtol=0.0, atol=1.0e-5
+      ):
+        raise RuntimeError(
+          f"paired descriptor timestamps are not synchronized: {style_path.name}"
+        )
+      if descriptor.shape != (n, len(STYLE_DESCRIPTOR_NAMES)):
+        raise RuntimeError(
+          f"style_descriptor: got {descriptor.shape}, expected "
+          f"{(n, len(STYLE_DESCRIPTOR_NAMES))}"
+        )
+      if valid.shape != (n,):
+        raise RuntimeError(
+          f"style_valid_mask: got {valid.shape}, expected {(n,)}"
+        )
+      if names != STYLE_DESCRIPTOR_NAMES:
+        raise RuntimeError("style descriptor schema/order does not match V1 17-D")
+      if not np.all(np.isfinite(descriptor)):
+        raise RuntimeError("style_descriptor contains NaN/Inf")
+      clip["style_descriptor"] = descriptor
+      clip["style_valid"] = valid
+
+    return clip, version
 
   def get_motion_length(self, motion_ids: torch.Tensor) -> torch.Tensor:
     return self.motion_lengths[motion_ids]
@@ -508,22 +596,7 @@ class SparseWholeBodyMotionLibrary:
         f"{motion_ids.shape} vs {query_time.shape}"
       )
 
-    lengths = self.motion_lengths[motion_ids]
-    t = torch.minimum(torch.clamp(query_time, min=0.0), lengths)
-
-    starts = self.motion_start_idx[motion_ids]
-    counts = self.motion_num_frames[motion_ids]
-    upper = self._upper_bound(motion_ids, t)
-
-    local_i1 = torch.minimum(torch.clamp(upper, min=1), counts - 1)
-    local_i0 = local_i1 - 1
-    i0 = starts + local_i0
-    i1 = starts + local_i1
-
-    t0 = self.timestamp_flat[i0]
-    t1 = self.timestamp_flat[i1]
-    alpha = (t - t0) / torch.clamp(t1 - t0, min=1.0e-6)
-    alpha = torch.clamp(alpha, min=0.0, max=1.0)
+    i0, i1, alpha = self._sample_indices(motion_ids, query_time)
 
     def lerp(x: torch.Tensor) -> torch.Tensor:
       x0 = x[i0]
@@ -551,3 +624,43 @@ class SparseWholeBodyMotionLibrary:
       lerp(self.npz_right_shoulder_height),
       lerp(self.npz_shoulder_heading_cw),
     )
+
+  def _sample_indices(
+    self,
+    motion_ids: torch.Tensor,
+    query_time: torch.Tensor,
+  ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if motion_ids.shape != query_time.shape:
+      raise ValueError(
+        f"motion_ids/query_time shape mismatch: "
+        f"{motion_ids.shape} vs {query_time.shape}"
+      )
+    lengths = self.motion_lengths[motion_ids]
+    t = torch.minimum(torch.clamp(query_time, min=0.0), lengths)
+    starts = self.motion_start_idx[motion_ids]
+    counts = self.motion_num_frames[motion_ids]
+    upper = self._upper_bound(motion_ids, t)
+    local_i1 = torch.minimum(torch.clamp(upper, min=1), counts - 1)
+    local_i0 = local_i1 - 1
+    i0 = starts + local_i0
+    i1 = starts + local_i1
+    t0 = self.timestamp_flat[i0]
+    t1 = self.timestamp_flat[i1]
+    alpha = (t - t0) / torch.clamp(t1 - t0, min=1.0e-6)
+    return i0, i1, torch.clamp(alpha, min=0.0, max=1.0)
+
+  def sample_style(
+    self,
+    motion_ids: torch.Tensor,
+    query_time: torch.Tensor,
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Interpolate synchronized human descriptors at command query times."""
+    if self.style_descriptor_flat is None or self.style_valid_flat is None:
+      raise RuntimeError("Style descriptors were not loaded for this library.")
+    i0, i1, alpha = self._sample_indices(motion_ids, query_time)
+    descriptor = (
+      self.style_descriptor_flat[i0] * (1.0 - alpha[:, None])
+      + self.style_descriptor_flat[i1] * alpha[:, None]
+    )
+    valid = self.style_valid_flat[i0] & self.style_valid_flat[i1]
+    return descriptor, valid

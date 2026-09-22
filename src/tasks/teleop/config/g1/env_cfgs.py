@@ -103,6 +103,15 @@ def unitree_g1_teleop_env_cfg(
   teleop_cmd.right_wrist_body_name = "right_wrist_yaw_link"
   teleop_cmd.left_shoulder_body_name = "left_shoulder_roll_link"
   teleop_cmd.right_shoulder_body_name = "right_shoulder_roll_link"
+  teleop_cmd.style_pelvis_body_name = "pelvis"
+  teleop_cmd.style_left_shoulder_body_name = "left_shoulder_pitch_link"
+  teleop_cmd.style_right_shoulder_body_name = "right_shoulder_pitch_link"
+  teleop_cmd.style_left_hip_body_name = "left_hip_pitch_link"
+  teleop_cmd.style_right_hip_body_name = "right_hip_pitch_link"
+  teleop_cmd.style_left_knee_body_name = "left_knee_link"
+  teleop_cmd.style_right_knee_body_name = "right_knee_link"
+  teleop_cmd.style_left_ankle_body_name = "left_ankle_pitch_link"
+  teleop_cmd.style_right_ankle_body_name = "right_ankle_pitch_link"
 
   cfg.events["foot_friction"].params[
     "asset_cfg"

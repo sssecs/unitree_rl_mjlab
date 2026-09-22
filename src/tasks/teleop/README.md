@@ -131,6 +131,34 @@ cmd shoulder heading           vs sim shoulder heading
 
 The wrist task remains stronger than the body-placement preferences.
 
+### Optional descriptor style reward
+
+`--env.commands.teleop.style-mode=baseline` keeps the existing reward behavior
+and is the default. `style-mode=descriptor` loads each command clip's paired
+`.style.npz` file and adds the synchronized minimal V7 reward for pelvis
+height, effective leg length, knee height, torso pitch, and shoulder-to-pelvis
+offset. The reward is gated by wrist tracking, descriptor validity, and the
+recorded-motion phase; it is disabled during alignment, warm-up, and recovery.
+For the current Fast-V7 stage, the stability gate is fixed at one so intentional
+torso/pelvis tilt in bend motions does not turn off the style signal. Descriptors
+are used only by the reward and are not added to actor observations.
+
+The COM balance ablation uses the mass-weighted whole-robot COM and the convex
+hull of the currently contacting G1 foot rectangles. Its reward is
+`sigmoid((margin - 0.02) / 0.015)`. In `balance-mode=reward_gate`, the style
+reward is additionally multiplied by `sigmoid((margin - 0.01) / 0.01)`.
+
+Run Groups A, B, and C sequentially with:
+
+```bash
+./tools/train_descriptor_then_baseline.sh
+```
+
+The script uses the same seed and 4096 environments for all runs: A has a 0.30
+balance reward without the style gate, B has a 0.30 reward with the gate, and C
+has a 0.15 reward with the same gate. The existing descriptor run is Group 0
+and is not retrained.
+
 ## Reset randomization
 
 Training resets randomize:

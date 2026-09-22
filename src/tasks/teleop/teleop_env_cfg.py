@@ -316,6 +316,16 @@ def make_teleop_env_cfg(
         "tolerance": 0.15,
       },
     ),
+    "com_balance": RewardTermCfg(
+      func=mdp.com_balance_reward,
+      weight=0.0,
+      params={"command_name": "teleop"},
+    ),
+    "human_style": RewardTermCfg(
+      func=mdp.human_style_reward,
+      weight=1.0,
+      params={"command_name": "teleop"},
+    ),
 
     # Only active after the recorded trajectory ends.  This makes recovery
     # converge toward the G1 nominal standing posture without constraining the
