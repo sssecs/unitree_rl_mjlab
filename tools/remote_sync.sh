@@ -48,7 +48,9 @@ fi
 "
 
 if ssh "$REMOTE_HOST" "command -v rsync >/dev/null 2>&1"; then
-  rsync -av \
+  # Shared g1train directories are owned by dev; codex may write files but
+  # cannot reset directory modes or timestamps. Preserve file timestamps only.
+  rsync -rltv --omit-dir-times \
     --files-from="$MANIFEST" \
     ./ \
     "$REMOTE_HOST:$REMOTE_REPO/"

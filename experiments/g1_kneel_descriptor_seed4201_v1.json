@@ -1,0 +1,53 @@
+{
+  "group": "g1_kneel_descriptor_seed4201_v1",
+  "mode": "screening",
+  "hypothesis": "Current human posture target in the teacher actor improves kneeling style and intended-side knee support without degrading wrist tracking; increasing style weight tests whether the 2.0 prior is underweighted.",
+  "task": "Unitree-G1-Teleop-Kneel",
+  "dataset": "/home/dev/EgoDex-PICO-kneel-synth; all validated left- and right-kneel command/style pairs",
+  "common_args": [
+    "--env.scene.num-envs=1024",
+    "--agent.max-iterations=2500",
+    "--agent.logger=tensorboard",
+    "--agent.save-interval=500",
+    "--env.commands.teleop.command-dir=/home/dev/EgoDex-PICO-kneel-synth"
+  ],
+  "runs": [
+    {
+      "name": "task_only",
+      "gpu": 0,
+      "seed": 4201,
+      "task": "Unitree-G1-Teleop-Kneel-Baseline",
+      "args": [
+        "--agent.run-name=g1_kneel_descriptor_seed4201_v1_task_only"
+      ]
+    },
+    {
+      "name": "style_only",
+      "gpu": 1,
+      "seed": 4201,
+      "task": "Unitree-G1-Teleop-Kneel",
+      "args": [
+        "--agent.run-name=g1_kneel_descriptor_seed4201_v1_style_only"
+      ]
+    },
+    {
+      "name": "style_actor",
+      "gpu": 2,
+      "seed": 4201,
+      "task": "Unitree-G1-Teleop-Kneel-TargetDescriptor",
+      "args": [
+        "--agent.run-name=g1_kneel_descriptor_seed4201_v1_style_actor"
+      ]
+    },
+    {
+      "name": "style_actor_w3",
+      "gpu": 3,
+      "seed": 4201,
+      "task": "Unitree-G1-Teleop-Kneel-TargetDescriptor",
+      "args": [
+        "--agent.run-name=g1_kneel_descriptor_seed4201_v1_style_actor_w3",
+        "--env.rewards.human-style.weight=3.0"
+      ]
+    }
+  ]
+}

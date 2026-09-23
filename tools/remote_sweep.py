@@ -43,6 +43,9 @@ def main() -> None:
   commands = []
   for run in runs:
     name = run["name"]
+    run_task = run.get("task", task)
+    if not isinstance(run_task, str) or not run_task:
+      raise ValueError(f"Run {name} needs a nonempty task ID.")
     if not SAFE_NAME.fullmatch(name):
       raise ValueError(f"Unsafe run name: {name}")
     session = f"{group}_{name}"
@@ -55,7 +58,7 @@ def main() -> None:
     command = [
       str(project_root / "tools" / "remote_train.sh"),
       session,
-      task,
+      run_task,
       "--gpu-ids",
       f"[{int(run['gpu'])}]",
       f"--agent.seed={int(run['seed'])}",

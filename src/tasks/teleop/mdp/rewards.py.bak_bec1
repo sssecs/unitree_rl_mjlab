@@ -7,7 +7,7 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
-from mjlab.utils.lab_api.math import matrix_from_quat, quat_error_magnitude
+from mjlab.utils.lab_api.math import quat_error_magnitude
 
 from .commands import SparseWholeBodyCommand, _yaw_quat_tensor
 
@@ -70,11 +70,6 @@ def _wrist_position_rms_error(
   return torch.sqrt(0.5 * (left.square() + right.square()) + 1.0e-12)
 
 
-def fell_over_termination_penalty(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """Penalize falls without penalizing successful command completion."""
-  return env.termination_manager.get_term("fell_over").to(torch.float32)
-
-
 def com_balance_reward(
   env: ManagerBasedRlEnv,
   command_name: str,
@@ -89,28 +84,12 @@ def com_balance_reward(
 def human_style_reward(
   env: ManagerBasedRlEnv,
   command_name: str,
-  shape_gate_floor: float = 0.25,
 ) -> torch.Tensor:
-  """Five-group human style prior with balance-aware morphology relaxation.
-
-  B-EC1 splits the original descriptor reward into two roles:
-
-  * semantic style (torso pitch + kneeling intent) remains active so a bend
-    does not collapse into an arbitrary crouch when balance becomes difficult;
-  * morphology-sensitive shape (pelvis height, leg extension, and
-    shoulder-pelvis relation) is relaxed as the COM approaches the support
-    boundary.
-
-  Wrist task tracking is not gated here.  The floor prevents the human prior
-  from disappearing completely in difficult poses (the failure mode seen in
-  the soft-balance C ablation).
-  """
+  """Synchronized five-group style reward with task and motion gates."""
   command = _command(env, command_name)
   result = torch.zeros(env.num_envs, device=env.device)
   if command.cfg.style_mode == "baseline":
     return result
-
-  shape_gate_floor = float(max(0.0, min(1.0, shape_gate_floor)))
 
   metric_names = (
     "style_active_fraction",
@@ -158,30 +137,26 @@ def human_style_reward(
     torch.sum(knee_activation, dim=-1) + 1.0e-6
   )
 
-  # Preserve the original total descriptor weight (1.15), but separate the
-  # human motion "mode" from morphology-sensitive numerical matching.
-  semantic_reward = 0.15 * torso_reward + 0.15 * knee_reward
-  shape_reward = (
+  style_reward = (
     0.30 * pelvis_reward
     + 0.35 * leg_reward
+    + 0.15 * torso_reward
     + 0.20 * shoulder_reward
+    + 0.15 * knee_reward
   )
 
   wrist_error = _wrist_position_rms_error(command)[env_ids]
   task_gate = torch.sigmoid((0.10 - wrist_error) / 0.025)
-
-  # Forward trunk pitch is intentional in bend motions.  As in ExtremControl,
-  # do not use torso pitch as a stability gate.
+  # Fast-V7 diagnostic stage: torso/pelvis tilt can be intentional in bend
+  # motions, and push disturbance is disabled.  Do not suppress the style
+  # signal based on posture; restore a pelvis/root dynamics gate only when
+  # perturbation training is re-enabled.
   stability_gate = torch.ones_like(task_gate)
   balance_gate = command.balance_style_gate[env_ids]
-  shape_gate = shape_gate_floor + (1.0 - shape_gate_floor) * balance_gate
 
-  active = valid.to(shape_reward.dtype)
+  active = valid.to(style_reward.dtype)
   result[env_ids] = (
-    active
-    * task_gate
-    * stability_gate
-    * (semantic_reward + shape_gate * shape_reward)
+    active * task_gate * stability_gate * balance_gate * style_reward
   )
 
   values = {
@@ -192,9 +167,6 @@ def human_style_reward(
     "style_shoulder_pelvis_reward": active * shoulder_reward,
     "style_knee_reward": active * knee_reward,
     "style_task_gate": active * task_gate,
-    # Keep this metric name for checkpoint/log continuity.  The posture gate is
-    # intentionally 1; the actual balance gate remains logged separately under
-    # Metrics/teleop/balance/style_balance_gate by the command term.
     "style_stability_gate": active * stability_gate,
     "style_robot_pelvis_height": active * robot[:, 0],
     "style_human_pelvis_height": active * human[:, 0],
@@ -277,14 +249,8 @@ def shoulder_mid_xy_tracking_exp(
   command_name: str,
   std: float,
   tolerance: float,
-  balance_gate_floor: float = 1.0,
 ) -> torch.Tensor:
-  """Soft shoulder-mid XY tracking with optional balance-aware relaxation.
-
-  Wrist targets stay invariant.  Shoulder XY is a posture cue, so B-EC1 lets
-  it yield partially when the G1 needs to move pelvis/support to remain viable.
-  A non-zero floor prevents the torso from drifting arbitrarily.
-  """
+  """Soft absolute shoulder-mid XY placement reward."""
   command = _command(env, command_name)
 
   error = torch.linalg.vector_norm(
@@ -293,15 +259,7 @@ def shoulder_mid_xy_tracking_exp(
     dim=-1,
   )
   excess = torch.relu(error - tolerance)
-  reward = torch.exp(-excess.square() / std**2)
-
-  balance_gate_floor = float(max(0.0, min(1.0, balance_gate_floor)))
-  if balance_gate_floor < 1.0:
-    gate = balance_gate_floor + (
-      1.0 - balance_gate_floor
-    ) * command.balance_style_gate
-    reward = reward * gate
-  return reward
+  return torch.exp(-excess.square() / std**2)
 
 
 def shoulder_height_tracking_exp(
@@ -346,22 +304,6 @@ def shoulder_heading_tracking_exp(
   )
   excess = torch.relu(error - tolerance)
   return torch.exp(-excess.square() / std**2)
-
-
-def stabilization_body_roll_l2(
-  env: ManagerBasedRlEnv,
-  command_name: str,
-) -> torch.Tensor:
-  """Penalize lateral roll only; forward pitch remains completely free.
-
-  This mirrors ExtremControl's useful separation between intentional forward
-  bending and undesirable lateral collapse.  ZYX roll is extracted from the
-  tracked stabilization body rotation; yaw is irrelevant to the result.
-  """
-  command = _command(env, command_name)
-  rotation = matrix_from_quat(command.sim_stabilization_body_quat_w)
-  roll = torch.atan2(rotation[:, 2, 1], rotation[:, 2, 2])
-  return torch.square(roll)
 
 
 def recovery_joint_posture_l2(
@@ -433,31 +375,6 @@ def feet_slide(
   return torch.sum(speed_sq * in_contact, dim=-1)
 
 
-def contact_weighted_foot_orientation_l2(
-  env: ManagerBasedRlEnv,
-  sensor_name: str,
-  asset_cfg: SceneEntityCfg,
-) -> torch.Tensor:
-  """Penalize support-foot tilt, inspired by ExtremControl.
-
-  Only feet that are actually contacting the ground contribute.  We use the
-  yaw-invariant tilt angle between the foot +Z axis and world +Z, which is a
-  smooth equivalent of penalizing foot roll/pitch near a flat support pose.
-  """
-  asset: Entity = env.scene[asset_cfg.name]
-  sensor: ContactSensor = env.scene[sensor_name]
-  in_contact = _contact_found_mask(sensor)
-
-  foot_quat = asset.data.body_link_quat_w[:, asset_cfg.body_ids, :]
-  rotation = matrix_from_quat(foot_quat)
-  up_dot = torch.clamp(rotation[..., 2, 2], -1.0, 1.0)
-  tilt_sq = torch.square(torch.acos(up_dot))
-
-  if in_contact.shape != tilt_sq.shape:
-    in_contact = in_contact.reshape_as(tilt_sq)
-  return torch.sum(tilt_sq * in_contact, dim=-1)
-
-
 def quiet_feet_when_task_stable(
   env: ManagerBasedRlEnv,
   command_name: str,
@@ -468,14 +385,8 @@ def quiet_feet_when_task_stable(
   base_speed_threshold: float,
   base_ang_speed_threshold: float,
   asset_cfg: SceneEntityCfg,
-  balance_gate_floor: float = 0.0,
 ) -> torch.Tensor:
-  """Penalize needless foot motion only for a stable manipulation hold.
-
-  B-EC1 additionally relaxes this term as the balance gate falls.  This removes
-  the contradiction where the controller needs to reconfigure support but the
-  quiet-feet penalty simultaneously discourages the required step.
-  """
+  """Penalize needless foot motion only for a quasi-static, already-tracked task."""
   command = _command(env, command_name)
   asset: Entity = env.scene[asset_cfg.name]
 
@@ -517,15 +428,7 @@ def quiet_feet_when_task_stable(
     torch.square(asset.data.body_link_lin_vel_w[:, asset_cfg.body_ids, :]),
     dim=(-2, -1),
   )
-  balance_gate_floor = float(max(0.0, min(1.0, balance_gate_floor)))
-  balance_release = balance_gate_floor + (
-    1.0 - balance_gate_floor
-  ) * command.balance_style_gate
-  return (
-    foot_speed_sq
-    * stable.to(foot_speed_sq.dtype)
-    * balance_release
-  )
+  return foot_speed_sq * stable.to(foot_speed_sq.dtype)
 
 
 def undesired_ground_contacts(

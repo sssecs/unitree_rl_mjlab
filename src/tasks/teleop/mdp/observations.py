@@ -15,6 +15,28 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 
+def target_style_descriptor(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+) -> torch.Tensor:
+  """Current human posture target for a privileged teacher actor.
+
+  The eight descriptor values are zeroed when unavailable.  A validity bit
+  distinguishes missing supervision from a legitimate zero-valued target.
+  """
+  command = cast(
+    SparseWholeBodyCommand,
+    env.command_manager.get_term(command_name),
+  )
+  command.ensure_episode_alignment()
+  env_ids = torch.arange(env.num_envs, device=env.device)
+  target, valid = command.human_style_target(env_ids)
+  # The robot reward compares exactly these first eight style dimensions.
+  target = target[:, :8]
+  target = torch.where(valid[:, None], target, torch.zeros_like(target))
+  return torch.cat((target, valid[:, None].to(target.dtype)), dim=-1)
+
+
 def sim_task_state_absolute(
   env: ManagerBasedRlEnv,
   command_name: str,
