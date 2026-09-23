@@ -1,8 +1,0 @@
-{
-  "hypothesis": "Warm-starting the EgoDex-position pilot and replacing every wrist command with mapped EgoDex position, shoulder-height, and relative wrist-orientation trajectories will teach full-pose tracking without numerical failure or backward-lean compensation.",
-  "source": "data/egodex_test_wrist_commands.npz; all 3243 EgoDex test clips; fixed per-clip shoulder-ground frame; 30 Hz position/quaternion interpolation; absolute ARKit hand orientation is mapped to the matching fixed G1 shoulder-ground frame without per-clip or per-reset wrist alignment.",
-  "baseline_checkpoint": "2026-09-15_03-11-37/model_19996.pt (25% EgoDex positions only)",
-  "training": "validation: one H20, 256 environments, 30 new PPO iterations; formal if validation passes: four-H20 DDP, 1024 environments per rank / 4096 total, 5000 new PPO iterations.",
-  "single_requested_change": "all wrist position, orientation, and shoulder-height commands use EgoDex (egodex_probability=1.0); clutch observation is retained for checkpoint compatibility but all commanded base velocity modes are disabled.",
-  "limitations": "The EgoDex test split is used for training by request and is not an independent evaluator. The absolute rotational map treats the transformed ARKit hand axes as the G1 wrist-link target axes; deployment must use the same fixed tool-frame convention in M. Completion email contains deterministic TensorBoard metrics only."
-}
