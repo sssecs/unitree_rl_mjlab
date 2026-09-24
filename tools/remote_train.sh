@@ -19,6 +19,8 @@ fi
 REMOTE_HOST="unitree-trainer"
 REMOTE_REPO="/home/dev/unitree_rl_mjlab"
 RUN_DIR="$REMOTE_REPO/.autotune/$SESSION"
+LOCAL_NOTIFY_CONFIG="$(git rev-parse --show-toplevel)/.autotune/notify.env"
+REMOTE_NOTIFY_CONFIG="$REMOTE_REPO/.autotune/notify.env"
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 
 if ssh "$REMOTE_HOST" "tmux has-session -t '$SESSION' 2>/dev/null"; then
@@ -66,6 +68,17 @@ scp "$METADATA_DIR/git_commit" \
     "$METADATA_DIR/train_args" \
     "$REMOTE_HOST:$RUN_DIR/"
 
+# The training process runs remotely and must be able to notify without a
+# workstation-side watcher. Keep SMTP credentials out of Git and provenance.
+NOTIFY_ENABLED=0
+if [[ -f "$LOCAL_NOTIFY_CONFIG" ]]; then
+    NOTIFY_ENABLED=1
+    REMOTE_NOTIFY_TMP="$REMOTE_NOTIFY_CONFIG.$SESSION.tmp"
+    ssh "$REMOTE_HOST" \
+        "umask 077; cat > '$REMOTE_NOTIFY_TMP' && chmod 600 '$REMOTE_NOTIFY_TMP' && mv '$REMOTE_NOTIFY_TMP' '$REMOTE_NOTIFY_CONFIG'" \
+        < "$LOCAL_NOTIFY_CONFIG"
+fi
+
 REMOTE_CMD="
 set -o pipefail
 date -Is > '$RUN_DIR/started_at'
@@ -75,6 +88,19 @@ AUTOTUNE_RUN_DIR='$RUN_DIR' bash ./run_train.sh $TRAIN_ARGS 2>&1 | tee '$RUN_DIR
 rc=\${PIPESTATUS[0]}
 
 echo \$rc > '$RUN_DIR/exit_code'
+date -Is > '$RUN_DIR/ended_at'
+if test '$NOTIFY_ENABLED' = 1 && test -f '$REMOTE_NOTIFY_CONFIG'; then
+  if python3 tools/remote_train_notify.py \
+    --session '$SESSION' --exit-code \"\$rc\" \
+    --run-dir '$RUN_DIR' --config '$REMOTE_NOTIFY_CONFIG' \
+    > '$RUN_DIR/notify.log' 2>&1; then
+    echo sent > '$RUN_DIR/notify_status'
+  else
+    echo failed > '$RUN_DIR/notify_status'
+  fi
+else
+  echo disabled > '$RUN_DIR/notify_status'
+fi
 date -Is > '$RUN_DIR/DONE'
 exit \$rc
 "

@@ -91,6 +91,9 @@ def activate_kneel_extensions() -> None:
       "episode/right_knee_contact_fraction",
       "episode/any_knee_contact_fraction",
       "episode/bilateral_knee_contact_fraction",
+      "descriptor_knee_contact_target",
+      "descriptor_knee_contact_match",
+      "descriptor_knee_support_approach",
       "command/phase",
       "command/wrist_task_weight",
     ):

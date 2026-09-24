@@ -42,8 +42,76 @@ def kneel_wrist_orientation_tracking_exp(env, command_name: str, std: float):
   )
 
 
+def descriptor_knee_contact_match_reward(
+  env,
+  command_name: str,
+  activation_height: float = 0.20,
+  activation_std: float = 0.03,
+  side_temperature: float = 0.05,
+  approach_std: float = 0.10,
+  contact_weight: float = 0.75,
+) -> torch.Tensor:
+  """Match descriptor-selected knee support with dense approach and contact.
+
+  The descriptor knee-ground distances select the support side. The term is
+  inactive until either target knee approaches the ground, so standing and
+  high-workspace motions receive no knee-contact incentive.  Height matching
+  gives a dense path toward contact; actual sensor contact supplies the final
+  support bonus.
+  """
+  command = _base._command(env, command_name)
+  result = torch.zeros(env.num_envs, device=env.device)
+  env_ids = command.motion_tracking_active.nonzero().flatten()
+  if env_ids.numel() == 0:
+    return result
+
+  human, valid = command.human_style_target(env_ids)
+  knee_height = human[:, 3:5]
+  nearest_height = torch.min(knee_height, dim=-1).values
+  activation = torch.sigmoid(
+    (activation_height - nearest_height) / activation_std
+  )
+  target_side = torch.softmax(-knee_height / side_temperature, dim=-1)
+  left_contact, right_contact = command.knee_contact_masks()
+  actual_contact = torch.stack(
+    (left_contact[env_ids], right_contact[env_ids]), dim=-1
+  ).to(human.dtype)
+  matched_contact = torch.sum(target_side * actual_contact, dim=-1)
+  robot_knee_height = command.robot_style_descriptor()[env_ids, 3:5]
+  approach = torch.sum(
+    target_side
+    * torch.exp(-torch.square((robot_knee_height - knee_height) / approach_std)),
+    dim=-1,
+  )
+  contact_weight = float(max(0.0, min(1.0, contact_weight)))
+  support_reward = (
+    (1.0 - contact_weight) * approach + contact_weight * matched_contact
+  )
+  result[env_ids] = valid.to(human.dtype) * activation * support_reward
+
+  if "descriptor_knee_contact_target" in command.metrics:
+    command.metrics["descriptor_knee_contact_target"][env_ids] = activation
+  if "descriptor_knee_contact_match" in command.metrics:
+    command.metrics["descriptor_knee_contact_match"][env_ids] = (
+      activation * matched_contact
+    )
+  if "descriptor_knee_support_approach" in command.metrics:
+    command.metrics["descriptor_knee_support_approach"][env_ids] = (
+      activation * approach
+    )
+  if "style_knee_reward" in command.metrics:
+    command.metrics["style_knee_reward"][env_ids] = (
+      activation * support_reward
+    )
+  return result
+
+
 def kneel_human_style_reward(
-  env, command_name: str, shape_gate_floor: float = 0.25
+  env,
+  command_name: str,
+  shape_gate_floor: float = 0.25,
+  torso_huber_weight: float = 1.0,
+  torso_huber_beta: float = 0.25,
 ) -> torch.Tensor:
   """Static-kneel descriptor reward with exploration floor and safe gating.
 
@@ -53,6 +121,9 @@ def kneel_human_style_reward(
     kneeling strategy before it already tracks low wrist targets accurately;
   * in ``reward_gate`` balance mode, balance only attenuates the shape part of
     style and never deletes the semantic torso/knee signal entirely;
+  * torso pitch uses a Huber penalty that still distinguishes the correct bend
+    direction when the posture is far from the target; this part is not gated
+    by wrist tracking.
   * the selected PICO candidate remains reward-only and is not an actor input.
   """
   command = _base._command(env, command_name)
@@ -95,28 +166,25 @@ def kneel_human_style_reward(
     torch.sin(robot[:, 5] - human[:, 5]),
     torch.cos(robot[:, 5] - human[:, 5]),
   )
-  torso_reward = torch.exp(-torch.square(torso_error / 0.25))
+  torso_loss = torch.nn.functional.smooth_l1_loss(
+    torso_error, torch.zeros_like(torso_error),
+    beta=torso_huber_beta, reduction="none",
+  )
 
   shoulder_error = torch.linalg.vector_norm(
     robot[:, 6:8] - human[:, 6:8], dim=-1
   )
   shoulder_reward = torch.exp(-torch.square(shoulder_error / 0.12))
 
-  knee_activation = torch.exp(-torch.square(human[:, 3:5] / 0.12))
-  knee_match = torch.exp(
-    -torch.square((robot[:, 3:5] - human[:, 3:5]) / 0.09)
-  )
-  knee_reward = torch.sum(knee_activation * knee_match, dim=-1) / (
-    torch.sum(knee_activation, dim=-1) + 1.0e-6
-  )
-
-  # Preserve the old total component weights when balance is disabled.
+  # Keep shape components separate from the ungated torso correction.
   shape_reward = (
     0.30 * pelvis_reward
     + 0.35 * leg_reward
     + 0.20 * shoulder_reward
   )
-  semantic_reward = 0.15 * torso_reward + 0.15 * knee_reward
+  # The torso loss is separate from the wrist gate: the previous narrow
+  # exponential had almost no signal for a policy bending backward.
+  semantic_reward = torch.zeros_like(shape_reward)
 
   wrist_error = _base._wrist_position_rms_error(command)[env_ids]
   raw_task_gate = torch.sigmoid((0.10 - wrist_error) / 0.025)
@@ -130,17 +198,21 @@ def kneel_human_style_reward(
   else:
     shape_balance_gate = torch.ones_like(balance_gate)
 
-  style_reward = semantic_reward + shape_balance_gate * shape_reward
-  active = valid.to(style_reward.dtype)
-  result[env_ids] = active * task_gate * stability_gate * style_reward
+  gated_style_reward = semantic_reward + shape_balance_gate * shape_reward
+  active = valid.to(gated_style_reward.dtype)
+  result[env_ids] = active * (
+    task_gate * stability_gate * gated_style_reward
+    - torso_huber_weight * torso_loss
+  )
 
   values = {
     "style_active_fraction": active,
     "style_pelvis_reward": active * pelvis_reward,
     "style_leg_reward": active * leg_reward,
-    "style_torso_reward": active * torso_reward,
+    # Historical metric name; now reports the negative Huber torso contribution.
+    "style_torso_reward": -active * torso_huber_weight * torso_loss,
     "style_shoulder_pelvis_reward": active * shoulder_reward,
-    "style_knee_reward": active * knee_reward,
+    "style_knee_reward": torch.zeros_like(active),
     "style_task_gate": active * task_gate,
     "style_stability_gate": active * stability_gate,
     "style_robot_pelvis_height": active * robot[:, 0],

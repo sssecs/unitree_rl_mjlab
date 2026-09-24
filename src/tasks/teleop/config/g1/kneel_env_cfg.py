@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mjlab.managers.observation_manager import ObservationTermCfg
+from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 import src.tasks.teleop.mdp as mdp
@@ -88,6 +89,19 @@ def unitree_g1_teleop_kneel_env_cfg(
 
   cfg.rewards["human_style"].func = mdp.kneel_human_style_reward
   cfg.rewards["human_style"].weight = 2.0 if descriptor_style else 0.0
+  if descriptor_style:
+    cfg.rewards["descriptor_knee_contact_match"] = RewardTermCfg(
+      func=mdp.descriptor_knee_contact_match_reward,
+      weight=1.0,
+      # Begin guiding the knee descent during the descriptor's transition,
+      # while remaining negligible for the standing portion of a motion.
+      params={
+        "command_name": "teleop",
+        "activation_height": 0.35,
+        "activation_std": 0.04,
+        "approach_std": 0.20,
+      },
+    )
 
   cfg.rewards["quiet_feet"].func = mdp.kneel_quiet_feet_when_task_stable
 
