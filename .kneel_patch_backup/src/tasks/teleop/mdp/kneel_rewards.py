@@ -272,7 +272,6 @@ def kneel_human_style_reward(
 def kneel_acquisition_style_reward(
   env,
   command_name: str,
-  shape_gate_floor: float = 0.25,
 ) -> torch.Tensor:
   """Broad positive-only posture shaping for the K0 acquisition stage."""
   command = _base._command(env, command_name)

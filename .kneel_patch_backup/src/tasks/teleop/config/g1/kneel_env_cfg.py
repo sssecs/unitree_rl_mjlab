@@ -151,10 +151,6 @@ def _configure_kneel_acquisition_rewards(cfg) -> None:
 
   cfg.rewards["human_style"].func = mdp.kneel_acquisition_style_reward
   cfg.rewards["human_style"].weight = 1.5
-  # The base human_style RewardTermCfg carries shape_gate_floor because the
-  # normal descriptor reward uses it.  Acquisition uses a different reward,
-  # so reset the inherited params when swapping the function.
-  cfg.rewards["human_style"].params = {"command_name": "teleop"}
 
   support = cfg.rewards.get("descriptor_knee_contact_match")
   if support is None:
