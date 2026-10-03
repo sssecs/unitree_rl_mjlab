@@ -1,0 +1,52 @@
+{
+  "group": "g1_kneel_descriptor_compare_v1",
+  "mode": "confirmation",
+  "hypothesis": "The current eight-dimensional human style target in actor observations improves intended-side knee support and descriptor matching without degrading wrist tracking across three paired independent seeds.",
+  "task": "Unitree-G1-Teleop-Kneel",
+  "dataset": "/home/dev/EgoDex-PICO-kneel-synth; all validated left- and right-kneel command/style pairs",
+  "common_args": [
+    "--env.scene.num-envs=1024",
+    "--agent.max-iterations=2500",
+    "--agent.logger=tensorboard",
+    "--agent.save-interval=500",
+    "--env.commands.teleop.command-dir=/home/dev/EgoDex-PICO-kneel-synth"
+  ],
+  "runs": [
+    {
+      "name": "style_only_seed4202",
+      "gpu": 0,
+      "seed": 4202,
+      "task": "Unitree-G1-Teleop-Kneel",
+      "args": [
+        "--agent.run-name=g1_kneel_descriptor_compare_v1_style_only_seed4202"
+      ]
+    },
+    {
+      "name": "style_actor_seed4202",
+      "gpu": 1,
+      "seed": 4202,
+      "task": "Unitree-G1-Teleop-Kneel-TargetDescriptor",
+      "args": [
+        "--agent.run-name=g1_kneel_descriptor_compare_v1_style_actor_seed4202"
+      ]
+    },
+    {
+      "name": "style_only_seed4203",
+      "gpu": 2,
+      "seed": 4203,
+      "task": "Unitree-G1-Teleop-Kneel",
+      "args": [
+        "--agent.run-name=g1_kneel_descriptor_compare_v1_style_only_seed4203"
+      ]
+    },
+    {
+      "name": "style_actor_seed4203",
+      "gpu": 3,
+      "seed": 4203,
+      "task": "Unitree-G1-Teleop-Kneel-TargetDescriptor",
+      "args": [
+        "--agent.run-name=g1_kneel_descriptor_compare_v1_style_actor_seed4203"
+      ]
+    }
+  ]
+}

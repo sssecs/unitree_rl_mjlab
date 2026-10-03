@@ -31,9 +31,27 @@ def make_teleop_env_cfg(
 
   # -----------------------------------------------------------------------
   # Observations
+  #
+  # Teacher actor sees:
+  #   1) absolute command target in a fixed episode/world frame
+  #   2) absolute simulated task state in the same fixed frame
+  #   3) explicit CURRENT target-minus-sim vector errors
+  #
+  # The explicit error is causal: it never indexes a future NPZ frame.
+  #
+  # Structured history:
+  #   - task/reference information is CURRENT only; repeating it 25 times is
+  #     redundant because the current explicit error already closes the loop.
+  #   - proprioception and the previous action keep ``history_length`` frames
+  #     so the policy still has temporal context for dynamics/contact inference.
+  #
+  # With G1 (29 DoF) and history_length=25 this gives:
+  #   actor  = 84 current task dims + 25 * 93 proprio/action dims = 2409
+  #   critic = actor + 3 current base-linear-velocity + 8 task scalars = 2420
   # -----------------------------------------------------------------------
 
   actor_terms = {
+    # Current task/reference branch: no history.
     "command_absolute": ObservationTermCfg(
       func=mdp.generated_commands,
       params={"command_name": "teleop"},
@@ -59,6 +77,8 @@ def make_teleop_env_cfg(
       params={"command_name": "teleop"},
       history_length=0,
     ),
+
+    # Dynamics branch: retain causal temporal context.
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_ang_vel"},
@@ -88,6 +108,7 @@ def make_teleop_env_cfg(
 
   critic_terms = {
     **actor_terms,
+    # Privileged critic-only terms are current-state summaries, not histories.
     "base_lin_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_lin_vel"},
@@ -105,6 +126,8 @@ def make_teleop_env_cfg(
       terms=actor_terms,
       concatenate_terms=True,
       enable_corruption=True,
+      # Important: do not set a group-level history override here.  Each term
+      # controls its own history_length above.
       history_length=None,
     ),
     "critic": ObservationGroupCfg(
@@ -115,14 +138,22 @@ def make_teleop_env_cfg(
     ),
   }
 
+  # -----------------------------------------------------------------------
+  # Actions
+  # -----------------------------------------------------------------------
+
   actions: dict[str, ActionTermCfg] = {
     "joint_pos": JointPositionActionCfg(
       entity_name="robot",
       actuator_names=(".*",),
-      scale=0.25,
+      scale=0.25,  # Override in robot-specific config.
       use_default_offset=True,
     )
   }
+
+  # -----------------------------------------------------------------------
+  # Command
+  # -----------------------------------------------------------------------
 
   commands: dict[str, CommandTermCfg] = {
     "teleop": SparseWholeBodyCommandCfg(
@@ -148,6 +179,14 @@ def make_teleop_env_cfg(
       loop=False,
     )
   }
+
+  # -----------------------------------------------------------------------
+  # Reset / domain randomization.
+  #
+  # Random SE(2) reset is deliberate. Each episode aligns the NPZ ONCE to
+  # the reset shoulder-mid XY/heading, preventing a fixed world trajectory
+  # from becoming an open-loop memorization shortcut.
+  # -----------------------------------------------------------------------
 
   events: dict[str, EventTermCfg] = {
     "reset_base": EventTermCfg(
@@ -220,10 +259,10 @@ def make_teleop_env_cfg(
     ),
   }
 
-  # B-EC1 reward structure.  Wrist tracking remains the hard task.  Human
-  # morphology cues and shoulder XY can relax near the support boundary, while
-  # contact-foot quality and roll-only stability follow the useful parts of
-  # ExtremControl without adding foot/pelvis/torso reference tracking.
+  # -----------------------------------------------------------------------
+  # Rewards: always absolute cmd-vs-sim task-space tracking.
+  # -----------------------------------------------------------------------
+
   rewards: dict[str, RewardTermCfg] = {
     "wrist_pos_coarse": RewardTermCfg(
       func=mdp.wrist_position_coarse_exp,
@@ -257,9 +296,6 @@ def make_teleop_env_cfg(
         "command_name": "teleop",
         "std": 0.20,
         "tolerance": 0.10,
-        # Human shoulder placement is a soft posture cue, not an invariant
-        # manipulation target.  Keep at least 30% of the cue near instability.
-        "balance_gate_floor": 0.30,
       },
     ),
     "shoulder_height": RewardTermCfg(
@@ -282,31 +318,18 @@ def make_teleop_env_cfg(
     ),
     "com_balance": RewardTermCfg(
       func=mdp.com_balance_reward,
-      weight=0.0,  # G1 config promotes this to 0.30 for B-EC1.
+      weight=0.0,
       params={"command_name": "teleop"},
     ),
     "human_style": RewardTermCfg(
       func=mdp.human_style_reward,
       weight=1.0,
-      params={
-        "command_name": "teleop",
-        # Do not let balance gating erase the human action mode completely.
-        "shape_gate_floor": 0.25,
-      },
-    ),
-    "stabilization_roll": RewardTermCfg(
-      func=mdp.stabilization_body_roll_l2,
-      weight=-0.10,
       params={"command_name": "teleop"},
     ),
-    "foot_orientation": RewardTermCfg(
-      func=mdp.contact_weighted_foot_orientation_l2,
-      weight=-0.10,
-      params={
-        "sensor_name": "feet_ground_contact",
-        "asset_cfg": SceneEntityCfg("robot", body_names=()),
-      },
-    ),
+
+    # Only active after the recorded trajectory ends.  This makes recovery
+    # converge toward the G1 nominal standing posture without constraining the
+    # redundancy used during the actual human-motion tracking phase.
     "recovery_joint_posture": RewardTermCfg(
       func=mdp.recovery_joint_posture_l2,
       weight=-0.10,
@@ -349,9 +372,6 @@ def make_teleop_env_cfg(
         "command_heading_rate_threshold": 0.15,
         "base_speed_threshold": 0.12,
         "base_ang_speed_threshold": 0.35,
-        # Release quiet-feet as support viability deteriorates so stepping is
-        # not directly contradicted by the regularizer.
-        "balance_gate_floor": 0.0,
         "asset_cfg": SceneEntityCfg("robot", body_names=()),
       },
     ),
@@ -364,7 +384,7 @@ def make_teleop_env_cfg(
       },
     ),
     "termination": RewardTermCfg(
-      func=mdp.fell_over_termination_penalty,
+      func=mdp.is_terminated,
       weight=-200.0,
     ),
     "self_collisions": RewardTermCfg(
@@ -388,6 +408,7 @@ def make_teleop_env_cfg(
         "command_name": "teleop",
         "margin_s": 0.0,
       },
+      time_out=True,
     ),
     "fell_over": TerminationTermCfg(
       func=mdp.bad_orientation,

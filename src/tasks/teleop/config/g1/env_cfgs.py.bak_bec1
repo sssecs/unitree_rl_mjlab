@@ -113,13 +113,6 @@ def unitree_g1_teleop_env_cfg(
   teleop_cmd.style_left_ankle_body_name = "left_ankle_pitch_link"
   teleop_cmd.style_right_ankle_body_name = "right_ankle_pitch_link"
 
-  # B-EC1 is now the G1 training default: the best B ablation (descriptor +
-  # COM reward + balance-aware style relaxation), augmented with the safe
-  # ExtremControl-inspired contact/stability terms configured below.
-  teleop_cmd.style_mode = "descriptor"
-  teleop_cmd.balance_mode = "reward_gate"
-  cfg.rewards["com_balance"].weight = 0.30
-
   cfg.events["foot_friction"].params[
     "asset_cfg"
   ].geom_names = r"^(left|right)_foot[1-7]_collision$"
@@ -133,30 +126,31 @@ def unitree_g1_teleop_env_cfg(
   cfg.rewards["quiet_feet"].params[
     "asset_cfg"
   ].body_names = FEET
-  cfg.rewards["foot_orientation"].params[
-    "asset_cfg"
-  ].body_names = FEET
 
   cfg.sim.contact_sensor_maxmatch = 128
   cfg.viewer.body_name = "torso_link"
 
-  # Keep external pushes OFF while learning support/posture adaptation.  Once
-  # B-EC1/B-EC2 support behavior is established, re-enable push recovery as a
-  # separate robustness fine-tuning stage.
+  # Fast-V7 posture-learning stage: do not spend on-policy samples on external
+  # push recovery while learning the newly released torso/posture redundancy.
+  # Re-enable this event for the later robustness fine-tuning stage.
   cfg.events.pop("push_robot", None)
 
   if play:
+    # Debug markers are useful in the viewer, but are disabled during training.
     teleop_cmd.debug_vis = True
     cfg.episode_length_s = int(1e9)
     cfg.observations["actor"].enable_corruption = False
+    # Deterministic initial placement is easier to inspect in the viewer.
     reset_pose = cfg.events["reset_base"].params["pose_range"]
     reset_pose["x"] = (0.0, 0.0)
     reset_pose["y"] = (0.0, 0.0)
     reset_pose["yaw"] = (0.0, 0.0)
 
     teleop_cmd.sampling_mode = "start"
+    # Sorted recursive file order -> motion 0 is deterministic for viewer debug.
     teleop_cmd.fixed_motion_id = 0
     teleop_cmd.fixed_motion_ids = None
+    # Viewer repeatedly runs: warm-up -> motion -> recover -> same motion.
     teleop_cmd.loop = False
     teleop_cmd.post_motion_behavior = "recover_then_chain"
     cfg.terminations.pop("command_finished", None)
