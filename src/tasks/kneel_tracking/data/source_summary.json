@@ -1,0 +1,29 @@
+{
+  "success": true,
+  "message": "`ftol` termination condition is satisfied.",
+  "cost": 93.67852053163062,
+  "n_knots": 54,
+  "duration_s": 6.800000000000001,
+  "shoulder_xy_drift_max_m": 0.5000332471422664,
+  "shoulder_height_min_m": 0.4863797480868711,
+  "shoulder_height_max_m": 1.0774890437638853,
+  "torso_pitch_min_deg": -2.184772789148997,
+  "torso_lateral_tilt_max_deg": 6.532572272794308,
+  "stability_margin_min_m": 0.014617579032713518,
+  "positive_stability_fraction": 1.0,
+  "desired_stability_fraction": 0.8333333333333334,
+  "active_contact_xy_error_max_m": 0.0010231154829368914,
+  "active_contact_z_error_max_m": 0.0011421984982557948,
+  "min_contact_marker_gap_m": {
+    "left_foot_fl": -2.653893472370772e-05,
+    "left_foot_fr": -7.903084637447821e-05,
+    "left_foot_rl": -6.340006937353287e-05,
+    "left_foot_rr": -4.134453517149611e-05,
+    "right_foot_fl": -8.088061388501766e-05,
+    "right_foot_fr": -3.1464604159953113e-05,
+    "right_foot_rl": -6.387621372067748e-05,
+    "right_foot_rr": -4.084100308901495e-05,
+    "left_knee": -2.919190338433568e-05,
+    "right_knee": -2.5303103775018917e-05
+  }
+}

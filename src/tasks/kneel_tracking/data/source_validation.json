@@ -1,0 +1,49 @@
+{
+  "passed": true,
+  "torso_pitch_at_keyposes_deg": {
+    "0.00": -0.37704008546246776,
+    "0.90": 32.04025395045122,
+    "1.70": 33.985552967036604,
+    "2.70": 49.715460251011564,
+    "3.60": -0.8451060731117632,
+    "4.25": -2.173270788364005,
+    "5.15": 9.571403723639149,
+    "5.80": 8.637493369143177,
+    "6.80": 48.36724372513602
+  },
+  "dense_torso_pitch_min_deg": -2.184772789148997,
+  "joint_limit_diagnostics": {
+    "left_knee_joint": {
+      "min_margin_rad": 0.031759167432157565,
+      "near_limit_knot_fraction": 0.018518518518518517,
+      "terminal_margin_rad": 0.12887953713488898
+    },
+    "left_ankle_pitch_joint": {
+      "min_margin_rad": 1.2051470932306074e-12,
+      "near_limit_knot_fraction": 0.018518518518518517,
+      "terminal_margin_rad": 0.1142105333927651
+    },
+    "right_knee_joint": {
+      "min_margin_rad": 0.11169049447789536,
+      "near_limit_knot_fraction": 0.0,
+      "terminal_margin_rad": 0.11816953109430894
+    },
+    "right_ankle_pitch_joint": {
+      "min_margin_rad": 0.032282862864471684,
+      "near_limit_knot_fraction": 0.018518518518518517,
+      "terminal_margin_rad": 0.11894452424849156
+    }
+  },
+  "knots": 54,
+  "min_stability_margin_m": 0.014617579032713518,
+  "active_xy_error_max_m": 0.0010231154829368914,
+  "active_z_error_max_m": 0.0011421984982557948,
+  "dense_min_stability_margin_m": 0.014617579032713518,
+  "dense_active_xy_error_max_m": 0.0012609807923214748,
+  "dense_marker_penetration_max_m": 0.001162329618346239,
+  "terminal_shoulder_height_m": 0.4863797480868711,
+  "max_self_penetration_m": 0.00015277139783062554,
+  "left_knee_hover_height_m": 0.042968119243012914,
+  "right_knee_hover_height_m": 0.040270833210292976,
+  "upright_to_low_shoulder_drop_m": 0.13643751576409746
+}
