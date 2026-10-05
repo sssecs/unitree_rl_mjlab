@@ -11,29 +11,34 @@ from src.tasks.tracking.config.g1.rl_cfg import unitree_g1_tracking_ppo_runner_c
 from . import mdp
 
 
-def kneel_env_cfg(play=False):
+def kneel_env_cfg(play=False, motion_file=None, command_name="kneel",
+                  episode_length_s=8.0, include_contact_targets=True):
   cfg = unitree_g1_flat_tracking_env_cfg(play=play)
   original = cfg.commands.pop("motion")
-  cfg.commands["kneel"] = mdp.KneelCommandCfg(
+  cfg.commands[command_name] = mdp.KneelCommandCfg(
     entity_name="robot",
-    motion_file=str(Path(__file__).parent / "data" / "kneel_50hz.npz"),
+    motion_file=str(motion_file or Path(__file__).parent / "data" / "kneel_50hz.npz"),
     anchor_body_name=original.anchor_body_name,
     body_names=original.body_names,
     resampling_time_range=(1e9, 1e9),
     sampling_mode="start",
     pose_range={}, velocity_range={}, joint_position_range=(0.0, 0.0),
+    include_contact_targets=include_contact_targets,
   )
   for group in cfg.observations.values():
     for term in group.terms.values():
       if term.params.get("command_name") == "motion":
-        term.params["command_name"] = "kneel"
+        term.params["command_name"] = command_name
     group.terms.pop("motion_anchor_pos_b", None)
-    group.terms["command"] = ObservationTermCfg(func=mdp.future_reference)
-    group.terms["contact_phase"] = ObservationTermCfg(func=mdp.contact_phase)
+    group.terms["command"] = ObservationTermCfg(
+      func=mdp.future_reference, params={"command_name": command_name}
+    )
+    if include_contact_targets:
+      group.terms["contact_phase"] = ObservationTermCfg(func=mdp.contact_phase)
     group.enable_corruption = False  # First validate the nominal teacher.
   for term in cfg.rewards.values():
     if term.params.get("command_name") == "motion":
-      term.params["command_name"] = "kneel"
+      term.params["command_name"] = command_name
   # Let physical contacts produce a feasible approximation. Keep root height
   # broad and weak, with no exact global XY target.
   cfg.rewards.pop("motion_global_root_pos")
@@ -47,6 +52,9 @@ def kneel_env_cfg(play=False):
   cfg.rewards["root_angular_velocity"] = RewardTermCfg(
     func=mdp.root_velocity_tracking, weight=0.2, params={"angular": True, "std": 2.0}
   )
+  for name in ("joint_position", "joint_velocity", "root_linear_velocity",
+               "root_angular_velocity"):
+    cfg.rewards[name].params["command_name"] = command_name
   cfg.rewards["action_rate_l2"].weight = -0.01
   # The reference approaches hard joint limits. Preserve those limits in the
   # model, but do not penalize legal kneel poses for entering the 90% soft range.
@@ -54,7 +62,7 @@ def kneel_env_cfg(play=False):
   cfg.events = {}
   for term in cfg.terminations.values():
     if term.params.get("command_name") == "motion":
-      term.params["command_name"] = "kneel"
+      term.params["command_name"] = command_name
   cfg.terminations["anchor_pos"].params["threshold"] = 0.5
   cfg.terminations["ee_body_pos"].params["threshold"] = 0.5
   cfg.terminations["ee_body_pos"].params["body_names"] = (
@@ -72,7 +80,7 @@ def kneel_env_cfg(play=False):
   cfg.scene.sensors = tuple(sensors)
   cfg.sim.nconmax = 64
   cfg.sim.njmax = 400
-  cfg.episode_length_s = 8.0
+  cfg.episode_length_s = episode_length_s
   return cfg
 
 

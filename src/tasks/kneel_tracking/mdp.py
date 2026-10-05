@@ -32,7 +32,7 @@ class KneelCommand(MotionCommand):
       self.metrics[name] = torch.zeros(self.num_envs, device=self.device)
 
   def _resample_command(self, env_ids):
-    # Always initialize from the standing first frame. No penetrating kneel RSI.
+    # Always initialize from the clip's first frame. No random kneel RSI.
     super()._resample_command(env_ids)
     # Reset has no pose perturbation, so aligned targets equal the reference.
     # Avoid retaining the previous episode's aligned targets until compute().
@@ -65,6 +65,7 @@ class KneelCommand(MotionCommand):
 @dataclass(kw_only=True)
 class KneelCommandCfg(MotionCommandCfg):
   future_offsets: tuple[int, ...] = (0, 5, 10, 25, 50, 100)
+  include_contact_targets: bool = True
 
   def build(self, env):
     if self.sampling_mode != "start":
@@ -74,12 +75,12 @@ class KneelCommandCfg(MotionCommandCfg):
     return KneelCommand(self, env)
 
 
-def get_command(env):
-  return env.command_manager.get_term("kneel")
+def get_command(env, command_name="kneel"):
+  return env.command_manager.get_term(command_name)
 
 
-def future_reference(env):
-  command = get_command(env)
+def future_reference(env, command_name="kneel"):
+  command = get_command(env, command_name)
   offsets = torch.tensor(command.cfg.future_offsets, device=env.device)
   frames = (command.time_steps[:, None] + offsets).clamp(max=command.motion.time_step_total - 1)
   motion = command.motion
@@ -90,11 +91,13 @@ def future_reference(env):
   root_ang = quat_apply_inverse(root_quat, motion.body_ang_vel_w[frames, 0])
   gravity = torch.zeros_like(root_lin)
   gravity[..., 2] = -1
-  return torch.cat([
+  terms = [
     motion.joint_pos[frames], motion.joint_vel[frames], root_lin, root_ang,
     quat_apply_inverse(root_quat, gravity), motion.body_pos_w[frames, 0, 2:3],
-    command.contact_targets[frames],
-  ], dim=-1).flatten(1)
+  ]
+  if command.cfg.include_contact_targets:
+    terms.append(command.contact_targets[frames])
+  return torch.cat(terms, dim=-1).flatten(1)
 
 
 def contact_phase(env):
@@ -111,15 +114,15 @@ def root_velocities(command):
   return target, measured
 
 
-def joint_tracking(env, velocity=False, std=0.5):
-  command = get_command(env)
+def joint_tracking(env, velocity=False, std=0.5, command_name="kneel"):
+  command = get_command(env, command_name)
   target = command.joint_vel if velocity else command.joint_pos
   measured = command.robot_joint_vel if velocity else command.robot_joint_pos
   return torch.exp(-(target - measured).square().mean(-1) / std**2)
 
 
-def root_velocity_tracking(env, angular=False, std=1.0):
-  command = get_command(env)
+def root_velocity_tracking(env, angular=False, std=1.0, command_name="kneel"):
+  command = get_command(env, command_name)
   if angular:
     target = quat_apply_inverse(command.body_quat_w[:, 0], command.body_ang_vel_w[:, 0])
     measured = quat_apply_inverse(command.robot_body_quat_w[:, 0], command.robot_body_ang_vel_w[:, 0])

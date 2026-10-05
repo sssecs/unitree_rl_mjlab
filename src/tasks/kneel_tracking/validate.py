@@ -4,22 +4,25 @@ import argparse
 import json
 
 import torch
+import numpy as np
 
 from mjlab.envs import ManagerBasedRlEnv
-from .env_cfg import kneel_env_cfg
+from mjlab.tasks.registry import load_env_cfg
 
 
-def validate(device="cuda:0", num_envs=4):
-  cfg = kneel_env_cfg()
+def validate(device="cuda:0", num_envs=4, task="Unitree-G1-Kneel-Tracking"):
+  cfg = load_env_cfg(task)
+  command_name = next(iter(cfg.commands))
   cfg.scene.num_envs = num_envs
   # Isolate command lifecycle from policy quality so the whole clip is covered.
   cfg.terminations = {"time_out": cfg.terminations["time_out"]}
-  cfg.episode_length_s = 20
+  with np.load(cfg.commands[command_name].motion_file, allow_pickle=False) as data:
+    cfg.episode_length_s = float(data["times"][-1]) + 2.0
   cfg.sim.nan_guard.enabled = True
   env = ManagerBasedRlEnv(cfg, device=device)
   try:
     obs, _ = env.reset()
-    command = env.command_manager.get_term("kneel")
+    command = env.command_manager.get_term(command_name)
     assert torch.all(command.time_steps == 0)
     actions = torch.zeros((num_envs, env.action_manager.total_action_dim), device=device)
     frames = command.motion.time_step_total
@@ -60,5 +63,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--device", default="cuda:0")
   parser.add_argument("--num-envs", type=int, default=4)
+  parser.add_argument("--task", default="Unitree-G1-Kneel-Tracking",
+                      choices=("Unitree-G1-Kneel-Tracking", "Unitree-G1-GMR-Tracking"))
   args = parser.parse_args()
-  validate(args.device, args.num_envs)
+  validate(args.device, args.num_envs, args.task)
