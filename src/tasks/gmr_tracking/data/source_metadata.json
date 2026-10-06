@@ -1,19 +1,19 @@
 {
-  "source": "/home/sykes/datasets/pico/trackingData_20261005_120456.txt",
-  "source_frames": 1326,
-  "source_duration_seconds": 14.747060992,
-  "source_fps_average": 89.8484111999528,
-  "output_frames": 885,
-  "fps": 60,
+  "source": "/home/sykes/datasets/pico/trackingData_20261006_163655.txt",
+  "source_frames": 14248,
+  "source_duration_seconds": 158.357769984,
+  "source_fps_average": 89.96716739216191,
+  "output_frames": 9502,
+  "fps": 60.0,
   "grounding": "support",
   "sole_clearance_m": 0.002,
-  "sole_height_before_min_m": -0.024390746540507505,
-  "sole_height_before_max_m": 0.006986212718444174,
-  "sole_height_after_min_m": 0.0019999999999998352,
-  "sole_height_after_max_m": 0.002000000000000182,
+  "sole_height_before_min_m": -0.02396784357193231,
+  "sole_height_before_max_m": 0.008485097132074387,
+  "sole_height_after_min_m": 0.001999999999999752,
+  "sole_height_after_max_m": 0.0020000000000002655,
   "robot": "unitree_g1",
   "human_height": null,
-  "ground_offset": -1.670787206445979,
+  "ground_offset": -1.0524051032242578,
   "quaternion_order": "xyzw",
   "joint_names": [
     "left_hip_pitch_joint",
@@ -46,6 +46,6 @@
     "right_wrist_pitch_joint",
     "right_wrist_yaw_joint"
   ],
-  "max_joint_limit_violation": 1.3877787807814457e-17,
-  "output": "/home/sykes/GMR/outputs/pico/trackingData_20261005_120456_unitree_g1.pkl"
+  "max_joint_limit_violation": 1.1102230246251565e-16,
+  "output": "/home/sykes/GMR/outputs/pico/trackingData_20261006_163655_unitree_g1.pkl"
 }

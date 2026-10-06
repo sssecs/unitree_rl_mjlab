@@ -4,16 +4,16 @@ Task: `Unitree-G1-GMR-Tracking`. This task trains on exactly one reference file,
 using the existing future-frame teacher/PPO implementation. It does not scan a
 directory or mix clips. The default training budget is 20 PPO updates.
 
-The bundled default is the shorter of the two current Pico exports:
-`~/GMR/outputs/pico/trackingData_20261005_120456_unitree_g1.npz`.
+The bundled default is the replacement Pico export selected on 2026-10-06:
+`~/GMR/outputs/pico/trackingData_20261006_163655_unitree_g1.npz`.
 The exact source is copied to `data/pico_original.npz`, its JSON metadata to
 `data/source_metadata.json`, and the converted reference to `data/pico_50hz.npz`.
 Training and playback do not depend on the external GMR directory.
 
-The source has 885 frames at 60 Hz, covering 14.733 seconds. Conversion maps GMR
+The source has 9502 frames at 60 Hz, covering 158.35 seconds. Conversion maps GMR
 root quaternions from xyzw to MuJoCo wxyz, reorders joints by name, resamples at
 50 Hz and computes body FK and velocities using the installed mjlab G1 model.
-The converted archive has 788 frames through 15.74 seconds, including about one
+The converted archive has 7969 frames through 159.36 seconds, including about one
 second of terminal hold. Episode length is reference duration plus 0.2 seconds.
 There is no reference repair or additional ground-height adjustment.
 
@@ -43,8 +43,17 @@ python scripts/train.py Unitree-G1-GMR-Tracking \
 This uses one GPU: 32 environments per rank and 32 globally. Logs/checkpoints
 are stored in `logs/rsl_rl/g1_gmr_tracking/`.
 
-Validated locally on 2026-10-05 with the existing miniconda environment and RTX
-4070. Four environments traversed all 788 reference frames over 798 steps with
+The replacement clip passed local validation on 2026-10-06: all converted pose
+and velocity arrays are finite, timing is 50 Hz, endpoint poses match the source,
+and final hold velocities are zero. Four environments traversed all 7969 frames
+over 7979 steps with finite rewards/observations, no endpoint reset, and an
+explicit reset to frame zero. Actor/critic widths remain 507/633. This was a
+zero-action lifecycle check with early terminations disabled, not policy
+evaluation or training. No new PPO training was launched for this replacement.
+
+The previous default clip was validated on 2026-10-05 with the existing miniconda
+environment and RTX 4070. Four environments traversed all 788 reference frames
+over 798 steps with
 finite rewards/observations, no endpoint reset, and successful explicit reset.
 The normal task completed 20 PPO updates and saved `model_19.pt`; all 45
 TensorBoard scalar series were finite. Final value/surrogate losses were
@@ -81,11 +90,11 @@ Use `--viewer viser` for a machine without a desktop display.
 
 ## Select another single trajectory
 
-Convert the other Pico export (or another GMR G1 NPZ of the same schema):
+Convert a selected GMR G1 NPZ of the same schema:
 
 ```bash
 python src/tasks/kneel_tracking/convert_motion.py \
-  --source ~/GMR/outputs/pico/trackingData_20261005_120431_unitree_g1.npz \
+  --source /path/to/another_unitree_g1.npz \
   --output src/tasks/gmr_tracking/data/pico_other_50hz.npz
 
 export UNITREE_GMR_MOTION_FILE="$PWD/src/tasks/gmr_tracking/data/pico_other_50hz.npz"
